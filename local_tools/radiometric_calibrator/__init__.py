@@ -2,6 +2,6 @@
 
 from .project import COEFFICIENTS_FILENAME
 
-__version__ = "2.1.0"
+__version__ = "2.1.1"
 
 __all__ = ["COEFFICIENTS_FILENAME", "__version__"]
