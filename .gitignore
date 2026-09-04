@@ -1,0 +1,36 @@
+# Reproducible source only; installers belong to GitHub Releases.
+__pycache__/
+*.py[cod]
+.venv/
+local_tools/radiometric_calibrator/.build-venv/
+local_tools/radiometric_calibrator/build/
+local_tools/radiometric_calibrator/dist/
+local_tools/radiometric_calibrator/*.spec
+local_tools/radiometric_calibrator/installer/bin/
+local_tools/radiometric_calibrator/installer/obj/
+local_tools/radiometric_calibrator/installer/generated/
+local_tools/radiometric_calibrator/installer/release/
+*.msi
+*.wixpdb
+*.zip
+*.log
+*.tmp
+.env
+*.key
+*.pem
+# Never commit actual imagery or task data.
+MS_test_data/
+*.jpg
+*.jpeg
+*.JPG
+*.JPEG
+*.tif
+*.tiff
+*.TIF
+*.TIFF
+*.dng
+*.DNG
+radiometric_calibration_coefficients.json
+.vscode/
+.idea/
+Thumbs.db

@@ -1,0 +1,48 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="DJI 多光谱辐射定标工具"
+           Manufacturer="DJI Local Tools (Independent Project)"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="67FE600A-68A2-4691-A58C-D5CC21D86B78"
+           Language="2052" Codepage="936"
+           Scope="perMachine" InstallerVersion="500">
+    <!-- Keep UpgradeCode stable for every release of this product. -->
+    <MajorUpgrade DowngradeErrorMessage="已安装更新的版本，请使用相同或更高版本的安装包。"
+                  Schedule="afterInstallInitialize" />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="mszip" />
+    <Property Id="DETECTED_WINDOWS_BUILD">
+      <RegistrySearch Id="WindowsBuildSearch" Root="HKLM"
+                      Key="SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+                      Name="CurrentBuildNumber" Type="raw" Bitness="always64" />
+    </Property>
+    <Launch Condition="Installed OR (VersionNT64 AND DETECTED_WINDOWS_BUILD &gt;= 17763)"
+            Message="需要 Windows 10 1809 或更新的 64 位 Windows（不支持 ARM64 原生运行）。" />
+    <Property Id="ARPCOMMENTS" Value="独立的 DJI 影像现场辐射定标工具，非 DJI 官方软件。卸载保留用户影像及定标项目。" />
+    <SetProperty Id="ARPINSTALLLOCATION" Value="[INSTALLFOLDER]" After="CostFinalize" Sequence="execute" />
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="DJI Radiometric Calibrator" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationMenuFolder" Name="DJI Radiometric Calibrator" />
+    </StandardDirectory>
+    <StandardDirectory Id="DesktopFolder" />
+    <Feature Id="MainFeature" Title="辐射定标工具" Level="1">
+      <ComponentGroupRef Id="ApplicationPayload" />
+      <ComponentRef Id="ApplicationShortcuts" />
+    </Feature>
+    <Component Id="ApplicationShortcuts" Directory="INSTALLFOLDER"
+               Guid="D77747CA-97CB-444A-BE14-74437861C94D" Bitness="always64">
+      <Shortcut Id="StartMenuShortcut" Directory="ApplicationMenuFolder"
+                Name="DJI 多光谱辐射定标工具" Target="[#ApplicationExecutable]"
+                WorkingDirectory="INSTALLFOLDER" />
+      <Shortcut Id="DesktopShortcut" Directory="DesktopFolder"
+                Name="DJI 多光谱辐射定标工具" Target="[#ApplicationExecutable]"
+                WorkingDirectory="INSTALLFOLDER" />
+      <RemoveFolder Id="RemoveApplicationMenu" Directory="ApplicationMenuFolder" On="uninstall" />
+      <RegistryValue Root="HKLM" Key="Software\DJILocalTools\RadiometricCalibrator"
+                     Name="Installed" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="Notice.rtf" />
+  </Package>
+</Wix>

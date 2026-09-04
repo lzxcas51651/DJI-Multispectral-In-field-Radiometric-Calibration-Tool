@@ -1,0 +1,7 @@
+PySide6>=6.7,<7
+numpy>=1.26,<3
+# Headless is intentional: opencv-python can bundle Qt DLLs that conflict with PySide6.
+opencv-python-headless>=4.10,<5
+rasterio>=1.4,<2
+Pillow>=10,<13
+PyInstaller>=6.10,<7
