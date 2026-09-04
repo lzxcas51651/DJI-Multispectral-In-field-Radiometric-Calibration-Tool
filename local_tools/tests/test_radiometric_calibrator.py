@@ -79,7 +79,8 @@ class CalibrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'alpha.tif'
             with rasterio.open(path, 'w', driver='GTiff', width=2, height=2, count=2,
-                               dtype='uint16', transform=from_origin(10, 20, 1, 1)) as dst:
+                               dtype='uint16', photometric='MINISBLACK', ALPHA='YES',
+                               transform=from_origin(10, 20, 1, 1)) as dst:
                 dst.write(np.ones((2, 2, 2), dtype='uint16'))
                 dst.colorinterp = (ColorInterp.gray, ColorInterp.alpha)
             self.assertEqual(describe_bands(path)[-1], 'Alpha')
