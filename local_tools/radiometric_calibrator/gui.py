@@ -166,24 +166,39 @@ class OperationThread(QThread):
 
 
 class BandMappingDialog(QDialog):
-    def __init__(self, bands, descriptions, parent=None):
+    def __init__(self, bands, descriptions, parent=None, sensor=None):
         super().__init__(parent)
         self.setWindowTitle("设置 DN 正射影像波段对应关系")
         self.setMinimumWidth(520)
         layout = QFormLayout(self)
-        layout.addRow(QLabel("每个定标波段必须对应一个不同的输入波段。输出按输入编号排序。"))
+        orders = {'P4M': ('Blue', 'Green', 'Red', 'RedEdge', 'NIR'),
+                  'M3M': ('Green', 'Red', 'RedEdge', 'NIR')}
+        self.fixed_order = orders.get(sensor)
+        self.mapping_error = ''
+        if self.fixed_order:
+            if len(descriptions) != len(self.fixed_order) or set(bands) != set(self.fixed_order):
+                self.mapping_error = f'{sensor} 需要 {len(self.fixed_order)} 个输入波段及完整的对应定标系数，请检查文件。'
+            layout.addRow(QLabel(f"{sensor} 固定波段对应关系（不重排）：输入波段 i → 输出波段 i。"))
+            bands = self.fixed_order
+        else:
+            layout.addRow(QLabel("每个定标波段必须对应一个不同的输入波段。输出按输入编号排序。"))
         self.combos = {}
         for band in bands:
             combo = QComboBox()
             combo.addItem("请选择输入波段", None)
             for index, description in enumerate(descriptions, 1):
-                combo.addItem(f"{index}: {description}", index)
+                name = self.fixed_order[index-1] if self.fixed_order and index <= len(self.fixed_order) else description
+                combo.addItem(f"输入 {index}: {name}（文件描述：{description}）", index)
             match = next((i for i, description in enumerate(descriptions, 1)
                           if band.lower() == description.lower().replace(' ', '')), 0)
             combo.setCurrentIndex(match)
+            if self.fixed_order:
+                index = self.fixed_order.index(band) + 1
+                combo.setCurrentIndex(index if index <= len(descriptions) else 0)
+                combo.setEnabled(False)
             self.combos[band] = combo
             combo.currentIndexChanged.connect(self._validate)
-            layout.addRow(band, combo)
+            layout.addRow(f"输出 {self.fixed_order.index(band)+1}: {band}" if self.fixed_order else band, combo)
         self.clip = QCheckBox("将反射率裁剪到 0～1（不勾选则保留超范围值供检查）")
         layout.addRow(self.clip)
         self.validation_label = QLabel()
@@ -209,6 +224,9 @@ class BandMappingDialog(QDialog):
         message = ('输入波段重复，请为红框中的波段选择不同的输入。' if duplicates
                    else '请完成所有波段选择。' if None in values else '波段对应关系检查通过。')
         valid = bool(values) and None not in values and not duplicates
+        if self.mapping_error:
+            valid = False
+            message = self.mapping_error
         if valid:
             order = sorted(self.band_map, key=self.band_map.get)
             message = '输出顺序：' + ' → '.join(f'{band}（输入 {self.band_map[band]}）' for band in order)
@@ -1061,7 +1079,8 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "GeoTIFF 读取失败", str(exc))
             return
-        mapping = BandMappingDialog(self.models, descriptions, self)
+        mapping = BandMappingDialog(self.models, descriptions, self,
+                                    sensor=self.catalog.sensor if self.catalog else None)
         if mapping.exec() != QDialog.Accepted:
             return
         band_map = mapping.band_map

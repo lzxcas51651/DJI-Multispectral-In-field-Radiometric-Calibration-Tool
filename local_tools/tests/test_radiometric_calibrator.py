@@ -81,6 +81,10 @@ class CalibrationTests(unittest.TestCase):
                                count=3, dtype='uint16', transform=from_origin(10, 20, 1, 1)) as dst:
                 for index in range(1, 4):
                     dst.write(np.full((2, 2), index * 100, dtype='uint16'), index)
+                dst.update_tags(TIFFTAG_SOFTWARE='source stitcher', flight='test-flight')
+                dst.update_tags(ns='CUSTOM', camera='M3M')
+                dst.update_tags(1, wavelength='560', STATISTICS_MEAN='100')
+                dst.scales = (2.0, 2.0, 2.0)
             model = {'slope': 0.001, 'intercept': 0, 'method': 'test'}
             # Deliberately reversed coefficient and mapping insertion order.
             models = {'NIR': model, 'Red': model, 'Green': model}
@@ -89,6 +93,14 @@ class CalibrationTests(unittest.TestCase):
                 self.assertEqual(dst.descriptions, ('Green', 'Red', 'NIR'))
                 np.testing.assert_allclose(dst.read()[:, 0, 0], [0.1, 0.2, 0.3], rtol=1e-6)
                 self.assertEqual(dst.tags(3)['source_band_index'], '3')
+                self.assertEqual(dst.tags()['flight'], 'test-flight')
+                self.assertEqual(dst.tags(ns='CUSTOM')['camera'], 'M3M')
+                self.assertEqual(dst.tags(1)['wavelength'], '560')
+                self.assertNotIn('STATISTICS_MEAN', dst.tags(1))
+                self.assertEqual(dst.scales, (1.0, 1.0, 1.0))
+                original = json.loads(dst.tags(ns='SOURCE_METADATA')['original_json'])
+                self.assertEqual(original['bands']['1']['default']['STATISTICS_MEAN'], '100')
+                self.assertEqual(original['scales'], [2.0, 2.0, 2.0])
             apply_models(source, output, {'NIR': model, 'Green': model}, {'NIR': 3, 'Green': 1})
             with rasterio.open(output) as dst:
                 self.assertEqual(dst.descriptions, ('Green', 'NIR'))

@@ -51,6 +51,14 @@ class GuiRegressionTests(unittest.TestCase):
         self.assertFalse(self.window._busy)
 
     def test_band_mapping_requires_complete_unique_choices(self):
+        for sensor, order in [('P4M', ['Blue', 'Green', 'Red', 'RedEdge', 'NIR']),
+                              ('M3M', ['Green', 'Red', 'RedEdge', 'NIR'])]:
+            fixed = BandMappingDialog(list(reversed(order)), ['Band'] * len(order), sensor=sensor)
+            self.assertEqual(fixed.band_map, {band: i for i, band in enumerate(order, 1)})
+            self.assertTrue(fixed.buttons.button(QDialogButtonBox.Ok).isEnabled())
+            self.assertTrue(all(not combo.isEnabled() for combo in fixed.combos.values()))
+            mismatch = BandMappingDialog(order, ['Band'], sensor=sensor)
+            self.assertFalse(mismatch.buttons.button(QDialogButtonBox.Ok).isEnabled())
         dialog = BandMappingDialog(['Green', 'Red'], ['Band 1', 'Band 2'])
         button = dialog.buttons.button(QDialogButtonBox.Ok)
         self.assertFalse(button.isEnabled())
