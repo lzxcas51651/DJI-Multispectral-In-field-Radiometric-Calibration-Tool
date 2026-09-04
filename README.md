@@ -1,6 +1,12 @@
 # DJI Multispectral In-field Radiometric Calibration Tool
 
-DJI P4M / M3M 多光谱现场辐射定标工具，独立 Windows 桌面程序。当前版本 **1.0.1**。
+DJI P4M / M3M 多光谱现场辐射定标工具，独立 Windows 桌面程序。当前版本 **2.0.0（v2.0）**。
+
+### v2.0 定标布预设
+
+每次绘制 ROI 后，可选择 Panel-01～Panel-10 或输入自定义编号。默认勾选“所有波段使用同一反射率”，例如 50% 填 `0.5`；取消勾选即可逐波段填写证书反射率。点击确定后，保存该编号的预设及最近选择，下次打开自动恢复；取消不保存。预设按传感器波段组合分别记忆，P4M 与 M3M 不混用。修改预设只影响新建 ROI，不会改写历史 ROI。
+
+预设保存在当前 Windows 用户的 `HKEY_CURRENT_USER\Software\DJI-Local-Tools\Radiometric-Calibrator`，不在影像文件夹内。清空当前任务不会清除预设；换电脑不会自动迁移。每批次使用前应核对定标布证书，不能因为记忆功能而忽略实际反射率差异。
 
 在 RGB 照片上勾选定标布，填写各波段的已知反射率，程序在计算时自动关联多光谱影像、配准 ROI、统计 DN 并拟合定标系数。也可将系数应用到 DN 多波段正射影像，输出 Float32 反射率 GeoTIFF。
 
@@ -8,12 +14,12 @@ DJI P4M / M3M 多光谱现场辐射定标工具，独立 Windows 桌面程序。
 
 ## 下载安装
 
-进入 [Releases](https://github.com/lzxcas51651/DJI-Multispectral-In-field-Radiometric-Calibration-Tool/releases)，下载 `DJI_Radiometric_Calibrator_1.0.1_x64.msi`。只需传输这个安装文件，不需要另复制运行库。若仓库为私有，需使用有权限的 GitHub 账号登录。
+进入 [Releases](https://github.com/lzxcas51651/DJI-Multispectral-In-field-Radiometric-Calibration-Tool/releases)，下载 `DJI_Radiometric_Calibrator_2.0.0_x64.msi`。只需传输这个安装文件，不需要另复制运行库。若仓库为私有，需使用有权限的 GitHub 账号登录。
 
 - 目标环境：Windows 10 1809+ / Windows 11，x64；其他系统未验证。
 - 运行软件无需安装 Python、.NET SDK、WSL、Docker 或 DJI Thermal SDK。
 - 安装需要管理员权限，支持选择目录、桌面/开始菜单快捷方式。
-- 已安装 1.0.0 的用户：关闭旧程序，运行 1.0.1 安装包升级。
+- 已安装 1.0.0 的用户：关闭旧程序，运行 2.0.0 安装包升级。
 - 修复：重新运行同版本 MSI，选择修复；卸载：Windows“已安装的应用”，或 MSI 维护界面。
 - 卸载不删除原始影像、定标项目或用户偏好设置。
 - 安装包暂未数字签名，可能显示未知发布者。核对来源和 Release 的 SHA256，不要关闭系统安全保护。
@@ -96,7 +102,7 @@ cd D:\Code\DJI-Radiometric\local_tools
 ```powershell
 powershell -ExecutionPolicy Bypass -File `
   local_tools\radiometric_calibrator\build_windows_installer.ps1 `
-  -Version 1.0.1 -UseStandaloneWix
+  -Version 2.0.0 -UseStandaloneWix
 ```
 
 该命令构建隔离 EXE、下载固定 WiX 工具、生成文件清单、做启动自检并编译/检查 MSI；不会自动安装软件。输出位于 `local_tools/radiometric_calibrator/installer/release/`。已有最新 EXE 时可加 `-SkipExeBuild`。发布新版本需递增三段版本号，保留稳定的 UpgradeCode。工具、依赖、生成目录与安装包不进入 Git；安装包上传 Release。

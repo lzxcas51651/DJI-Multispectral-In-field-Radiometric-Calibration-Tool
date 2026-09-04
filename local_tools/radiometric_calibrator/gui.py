@@ -147,20 +147,37 @@ class CandidateThread(QThread):
 
 
 class RoiDialog(QDialog):
-    def __init__(self, bands: tuple[str, ...], parent=None):
+    def __init__(self, bands: tuple[str, ...], parent=None, settings: QSettings | None = None):
         super().__init__(parent)
+        self.settings = settings if settings is not None else QSettings("DJI-Local-Tools", "Radiometric-Calibrator")
+        self.preset_key = "panel_presets/" + "_".join(bands)
+        try:
+            self.presets = json.loads(self.settings.value(self.preset_key, "{}"))
+            if not isinstance(self.presets, dict):
+                self.presets = {}
+        except (ValueError, TypeError):
+            self.presets = {}
         self.setWindowTitle("新增 RGB 定标布 ROI")
         self.setMinimumWidth(420)
         layout = QFormLayout(self)
         self.panel_id = QComboBox()
         self.panel_id.setEditable(True)
-        self.panel_id.addItems(["Panel-01", "Panel-02", "Panel-03"])
+        self.panel_id.addItems(list(dict.fromkeys([f"Panel-{i:02d}" for i in range(1, 11)] + list(self.presets))))
         layout.addRow("定标布编号", self.panel_id)
-        layout.addRow(QLabel("输入定标布证书中各波段的反射率："))
+        layout.addRow(QLabel("反射率用小数填写，例如 50% 填 0.5。确认 ROI 时记忆预设。"))
+        self.uniform = QCheckBox("所有波段使用同一反射率")
+        self.uniform.setChecked(True)
+        layout.addRow(self.uniform)
+        self.uniform_value = QDoubleSpinBox()
+        self.uniform_value.setRange(0.0, 1.0)
+        self.uniform_value.setDecimals(6)
+        self.uniform_value.setSingleStep(0.01)
+        self.uniform_value.setValue(0.5)
+        layout.addRow("统一反射率", self.uniform_value)
         self.reflectance_inputs: dict[str, QDoubleSpinBox] = {}
         for band in bands:
             spin = QDoubleSpinBox()
-            spin.setRange(0.0, 1.5)
+            spin.setRange(0.0, 1.0)
             spin.setDecimals(6)
             spin.setSingleStep(0.01)
             spin.setValue(0.5)
@@ -170,6 +187,54 @@ class RoiDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
+        self.uniform.toggled.connect(self._update_uniform)
+        self.uniform_value.valueChanged.connect(self._update_uniform)
+        self.panel_id.currentTextChanged.connect(self._load_panel)
+        self.panel_id.setCurrentText(self.settings.value(self.preset_key + "_last", "Panel-01"))
+        self._load_panel(self.panel_id.currentText())
+
+    def _update_uniform(self, *_args) -> None:
+        uniform = self.uniform.isChecked()
+        self.uniform_value.setEnabled(uniform)
+        for spin in self.reflectance_inputs.values():
+            spin.setEnabled(not uniform)
+            if uniform:
+                spin.setValue(self.uniform_value.value())
+
+    def _load_panel(self, name: str) -> None:
+        preset = self.presets.get(name.strip(), {})
+        if not isinstance(preset, dict):
+            preset = {}
+        self.uniform.blockSignals(True)
+        self.uniform_value.blockSignals(True)
+        self.uniform.setChecked(bool(preset.get("uniform", True)))
+        def number(value):
+            try:
+                value = float(value)
+                return value if 0 <= value <= 1 else 0.5
+            except (ValueError, TypeError):
+                return 0.5
+        self.uniform_value.setValue(number(preset.get("value", 0.5)))
+        values = preset.get("bands", {})
+        if not isinstance(values, dict):
+            values = {}
+        for band, spin in self.reflectance_inputs.items():
+            spin.setValue(number(values.get(band, 0.5)))
+        self.uniform.blockSignals(False)
+        self.uniform_value.blockSignals(False)
+        self._update_uniform()
+
+    def accept(self) -> None:
+        name = self.panel_id.currentText().strip()
+        if not name:
+            QMessageBox.warning(self, "需要编号", "请选择或输入定标布编号。")
+            return
+        self.presets[name] = {"uniform": self.uniform.isChecked(),
+                              "value": self.uniform_value.value(), "bands": self.reflectance_by_band}
+        self.settings.setValue(self.preset_key, json.dumps(self.presets, ensure_ascii=False))
+        self.settings.setValue(self.preset_key + "_last", name)
+        self.settings.sync()
+        super().accept()
 
     @property
     def reflectance_by_band(self) -> dict[str, float]:
@@ -746,7 +811,7 @@ class MainWindow(QMainWindow):
         if not self.current_capture or "RGB" not in self.current_capture.files or not self.catalog:
             QMessageBox.information(self, "没有 RGB", "请先在左侧选择一张 RGB 定标布照片。")
             return
-        dialog = RoiDialog(self.catalog.expected_bands, self)
+        dialog = RoiDialog(self.catalog.expected_bands, self, settings=self.settings)
         if dialog.exec() != QDialog.Accepted:
             return
         path = self.current_capture.files["RGB"]

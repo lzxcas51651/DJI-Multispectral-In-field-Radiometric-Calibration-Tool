@@ -39,7 +39,7 @@ cd F:\DJ_image_preprocessing
 
 powershell -ExecutionPolicy Bypass -File `
   local_tools\radiometric_calibrator\build_windows_installer.ps1 `
-  -Version 1.0.1 -UseStandaloneWix
+  -Version 2.0.0 -UseStandaloneWix
 ```
 
 脚本会先构建 EXE，再检查发布目录、生成 MSI 文件清单、测试 EXE 启动，最后编译安装包。它不会执行安装。
@@ -49,14 +49,14 @@ powershell -ExecutionPolicy Bypass -File `
 ```powershell
 powershell -ExecutionPolicy Bypass -File `
   local_tools\radiometric_calibrator\build_windows_installer.ps1 `
-  -Version 1.0.1 -SkipExeBuild -UseStandaloneWix
+  -Version 2.0.0 -SkipExeBuild -UseStandaloneWix
 ```
 
 输出位于以下目录（可能包含语言子目录，以脚本打印的完整路径为准）：
 
 ```text
 local_tools\radiometric_calibrator\installer\release\
-    DJI_Radiometric_Calibrator_1.0.1_x64.msi
+    DJI_Radiometric_Calibrator_2.0.0_x64.msi
 ```
 
 只需传输这个 MSI，不需要再手动传输 `_internal`。脚本会打印 SHA256，便于传输前后比较。
@@ -83,7 +83,7 @@ powershell -ExecutionPolicy Bypass -File `
 需要强制重新复制所有程序文件时，在管理员 PowerShell 中执行（将路径改为实际 MSI 路径）：
 
 ```powershell
-$MSI = 'D:\Installers\DJI_Radiometric_Calibrator_1.0.1_x64.msi'
+$MSI = 'D:\Installers\DJI_Radiometric_Calibrator_2.0.0_x64.msi'
 msiexec.exe /fa "$MSI" /norestart /L*v "$env:TEMP\dji-calibrator-repair.log"
 ```
 
@@ -94,7 +94,7 @@ msiexec.exe /fa "$MSI" /norestart /L*v "$env:TEMP\dji-calibrator-repair.log"
 关闭程序，在 Windows“已安装的应用”中找到“DJI 多光谱辐射定标工具”并卸载；也可重新运行 MSI 选择删除，或执行：
 
 ```powershell
-$MSI = 'D:\Installers\DJI_Radiometric_Calibrator_1.0.1_x64.msi'
+$MSI = 'D:\Installers\DJI_Radiometric_Calibrator_2.0.0_x64.msi'
 msiexec.exe /x "$MSI" /norestart /L*v "$env:TEMP\dji-calibrator-uninstall.log"
 ```
 
@@ -102,7 +102,7 @@ msiexec.exe /x "$MSI" /norestart /L*v "$env:TEMP\dji-calibrator-uninstall.log"
 
 ## 5. 升级规则
 
-每次发布代码或依赖更新，都提升 MSI 三段版本号，例如 `1.0.0 → 1.0.1`，重新构建后分发新 MSI。不要用同一版本号发布内容不同的包，也不要使用第四段版本号区分更新。
+每次发布代码或依赖更新，都提升 MSI 三段版本号，例如 `1.0.0 → 2.0.0`，重新构建后分发新 MSI。不要用同一版本号发布内容不同的包，也不要使用第四段版本号区分更新。
 
 `Package.wxs` 中的 `UpgradeCode` 必须保持不变；文件组件的 GUID 按相对安装路径稳定生成。应用升级需要关闭正在运行的 EXE，安装器可能提示关闭或重启。
 
@@ -119,14 +119,14 @@ msiexec.exe /x "$MSI" /norestart /L*v "$env:TEMP\dji-calibrator-uninstall.log"
 
 编译通过不等于完成以上安装生命周期测试。工程不含自动安装/卸载脚本，避免误操作工作电脑。当前 MSI 没有数字签名，Windows 可能显示未知发布者；正式广泛分发前应使用自己的代码签名证书签名，不应让用户关闭系统安全防护。
 
-`1.0.0` 已通过轻量 WiX 路线编译及文件表检查。`1.0.1` 增加任务清空、交互优化、原目录保存与依赖许可证元数据，独立工具的 18 项核心/GUI/安装工程测试通过。源码测试、启动自检和 MSI 数据库只读检查不等同于干净 Windows 测试机上的安装/修复/卸载全流程验收，后者仍需执行。
+`1.0.0` 已通过轻量 WiX 路线编译及文件表检查。`2.0.0` 增加任务清空、交互优化、原目录保存与依赖许可证元数据，独立工具的 18 项核心/GUI/安装工程测试通过。源码测试、启动自检和 MSI 数据库只读检查不等同于干净 Windows 测试机上的安装/修复/卸载全流程验收，后者仍需执行。
 
 可单独重复只读检查（不会安装）：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File `
   local_tools\radiometric_calibrator\installer\verify_msi.ps1 `
-  -MsiPath local_tools\radiometric_calibrator\installer\release\DJI_Radiometric_Calibrator_1.0.1_x64.msi
+  -MsiPath local_tools\radiometric_calibrator\installer\release\DJI_Radiometric_Calibrator_2.0.0_x64.msi
 ```
 
 ## 7. 工程文件

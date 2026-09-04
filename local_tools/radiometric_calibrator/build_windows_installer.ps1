@@ -1,5 +1,5 @@
 param(
-    [string]$Version = '1.0.1',
+    [string]$Version = '2.0.0',
     [switch]$SkipExeBuild,
     [switch]$PrepareOnly,
     [switch]$UseStandaloneWix,

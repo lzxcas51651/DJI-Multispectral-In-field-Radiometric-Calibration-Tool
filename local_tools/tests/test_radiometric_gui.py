@@ -12,7 +12,7 @@ from PySide6.QtGui import QImage, QMouseEvent, QWheelEvent
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from radiometric_calibrator.catalog import Catalog, Capture
-from radiometric_calibrator.gui import ImageCanvas, MainWindow, load_preview
+from radiometric_calibrator.gui import ImageCanvas, MainWindow, RoiDialog, load_preview
 from radiometric_calibrator.registration import RegistrationResult
 from radiometric_calibrator.roi import RgbRoiAnnotation
 
@@ -55,6 +55,36 @@ class GuiRegressionTests(unittest.TestCase):
             preview, original = load_preview(self.photo, 180)
         self.assertEqual(original.width(), 3000)
         self.assertEqual(preview.width(), 180)
+
+    def test_panel_presets_uniform_individual_and_restart(self):
+        settings = self.window.settings
+        bands = ('Green', 'Red', 'RedEdge', 'NIR')
+        dialog = RoiDialog(bands, settings=settings)
+        self.assertGreaterEqual(dialog.panel_id.count(), 10)
+        dialog.panel_id.setCurrentText('Panel-10')
+        dialog.uniform_value.setValue(0.23)
+        self.assertEqual(dialog.reflectance_by_band, dict.fromkeys(bands, 0.23))
+        dialog.accept()
+        restarted = RoiDialog(bands, settings=QSettings(settings.fileName(), QSettings.IniFormat))
+        self.assertEqual(restarted.panel_id.currentText(), 'Panel-10')
+        self.assertEqual(restarted.reflectance_by_band['NIR'], 0.23)
+        restarted.panel_id.setCurrentText('Custom panel')
+        restarted.uniform.setChecked(False)
+        restarted.reflectance_inputs['NIR'].setValue(0.41)
+        restarted.accept()
+        again = RoiDialog(bands, settings=settings)
+        self.assertFalse(again.uniform.isChecked())
+        self.assertEqual(again.reflectance_by_band['NIR'], 0.41)
+        again.panel_id.setCurrentText('Panel-10')
+        self.assertTrue(again.uniform.isChecked())
+        self.assertEqual(again.reflectance_by_band['NIR'], 0.23)
+        again.uniform_value.setValue(0.99)
+        again.reject()
+        final = RoiDialog(bands, settings=settings)
+        final.panel_id.setCurrentText('Panel-10')
+        self.assertEqual(final.reflectance_by_band['NIR'], 0.23)
+        different_sensor = RoiDialog(('Blue',) + bands, settings=settings)
+        self.assertEqual(different_sensor.reflectance_by_band['NIR'], 0.5)
 
     def test_cache_reuses_preview_and_clear_releases_it(self):
         canvas = self.window.canvas
