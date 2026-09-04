@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 
 import numpy as np
 import rasterio
+from rasterio.windows import Window
 
 
 def describe_bands(path: str | Path) -> list[str]:
@@ -17,48 +20,70 @@ def apply_models(
     models: dict[str, dict],
     band_map: dict[str, int],
     clip: bool = False,
+    progress=None,
 ) -> Path:
     source_path, output_path = Path(source_path), Path(output_path)
+    if source_path.resolve() == output_path.resolve() or (
+        output_path.exists() and os.path.samefile(source_path, output_path)
+    ):
+        raise ValueError("输出文件不能与输入 DN 影像相同。")
     ordered_bands = list(models)
-    with rasterio.open(source_path) as source:
-        profile = source.profile.copy()
-        profile.update(
-            driver="GTiff",
-            dtype="float32",
-            count=len(ordered_bands),
-            compress="deflate",
-            tiled=True,
-            predictor=3,
-            nodata=np.nan,
-            BIGTIFF="IF_SAFER",
-        )
-        # A source strip profile can carry non-compliant block sizes. Explicitly
-        # choose valid TIFF tile dimensions (multiples of 16) for the output.
-        profile["blockxsize"] = 256
-        profile["blockysize"] = 256
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with rasterio.open(output_path, "w", **profile) as target:
-            for output_index, band in enumerate(ordered_bands, 1):
-                if band not in band_map:
-                    raise ValueError(f"没有为 {band} 指定输入 GeoTIFF 波段。")
-                source_index = int(band_map[band])
-                model = models[band]
-                for _, window in source.block_windows(source_index):
-                    raw = source.read(source_index, window=window, masked=True).astype(np.float32)
-                    result = raw * np.float32(model["slope"]) + np.float32(model["intercept"])
-                    if clip:
-                        result = np.ma.clip(result, 0.0, 1.0)
-                    target.write(result.filled(np.nan).astype(np.float32), output_index, window=window)
-                target.set_band_description(output_index, band)
-                target.update_tags(
-                    output_index,
-                    calibration_slope=str(model["slope"]),
-                    calibration_intercept=str(model["intercept"]),
-                    calibration_method=str(model["method"]),
-                    units="reflectance_0_to_1",
-                )
-            target.update_tags(
-                radiometric_calibration="field_reflectance_panel",
-                source_orthophoto=str(source_path.resolve()),
-            )
-    return output_path
+    if not ordered_bands or any(band not in band_map for band in ordered_bands):
+        raise ValueError("请为每个定标波段指定输入 GeoTIFF 波段。")
+    indices = [band_map[band] for band in ordered_bands]
+    if any(not isinstance(index, int) or isinstance(index, bool) for index in indices):
+        raise ValueError("输入波段编号必须为整数。")
+    if len(set(indices)) != len(indices):
+        raise ValueError("输入波段重复：每个定标波段必须对应不同的输入波段。")
+    # Preserve the source order of calibrated bands, independently of the
+    # coefficient JSON or mapping-dialog order. Uncalibrated bands are omitted.
+    ordered_bands.sort(key=lambda band: band_map[band])
+    report = progress or (lambda value, message: None)
+    temporary = None
+    try:
+        report(0, "正在读取 DN 影像")
+        with rasterio.open(source_path) as source:
+            if any(index < 1 or index > source.count for index in indices):
+                raise ValueError(f"输入波段编号必须介于 1 和 {source.count}。")
+            profile = source.profile.copy()
+            profile.update(driver="GTiff", dtype="float32", count=len(ordered_bands),
+                           compress="deflate", tiled=True, predictor=3, nodata=np.nan,
+                           BIGTIFF="IF_SAFER", blockxsize=256, blockysize=256)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            fd, name = tempfile.mkstemp(prefix=".reflectance-", suffix=".tif", dir=output_path.parent)
+            os.close(fd)
+            temporary = Path(name)
+            block_count = ((source.width + 511) // 512) * ((source.height + 511) // 512)
+            total, done, previous = block_count * len(ordered_bands), 0, -1
+            with rasterio.open(temporary, "w", **profile) as target:
+                for output_index, band in enumerate(ordered_bands, 1):
+                    model = models[band]
+                    # Bounded blocks avoid source strips that span an enormous image.
+                    for row in range(0, source.height, 512):
+                        for col in range(0, source.width, 512):
+                            window = Window(col, row, min(512, source.width-col), min(512, source.height-row))
+                            raw = source.read(band_map[band], window=window, masked=True).astype(np.float32)
+                            result = raw * np.float32(model["slope"]) + np.float32(model["intercept"])
+                            if clip:
+                                result = np.ma.clip(result, 0.0, 1.0)
+                            target.write(result.filled(np.nan).astype(np.float32), output_index, window=window)
+                            done += 1
+                            percent = min(99, int(done * 99 / total))
+                            if percent != previous:
+                                report(percent, f"正在转换 {band}：处理块 {done}/{total}")
+                                previous = percent
+                    target.set_band_description(output_index, band)
+                    target.update_tags(output_index, calibration_slope=str(model["slope"]),
+                                       source_band_index=str(band_map[band]),
+                                       calibration_intercept=str(model["intercept"]),
+                                       calibration_method=str(model["method"]), units="reflectance_0_to_1")
+                target.update_tags(radiometric_calibration="field_reflectance_panel",
+                                   source_orthophoto=str(source_path.resolve()))
+                report(99, "正在完成压缩和写入，请勿关闭程序")
+        os.replace(temporary, output_path)
+        temporary = None
+        report(100, "反射率影像已保存")
+        return output_path
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)

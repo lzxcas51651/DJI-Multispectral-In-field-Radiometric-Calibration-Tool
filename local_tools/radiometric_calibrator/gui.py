@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from copy import deepcopy
 from collections import OrderedDict
 from pathlib import Path
 
@@ -34,6 +35,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QProgressDialog,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -47,6 +49,7 @@ from . import __version__
 from .candidate import Candidate, find_candidates
 from .catalog import BANDS, Capture, Catalog, scan_folder
 from .geotiff import apply_models, describe_bands
+from .processing import calculate_coefficients
 from .metadata import read_image_metadata
 from .project import COEFFICIENTS_FILENAME, load_coefficients, save_coefficients
 from .registration import register_rgb_to_band, transform_polygon
@@ -144,6 +147,78 @@ class CandidateThread(QThread):
                 self.completed.emit(result)
         except Exception as exc:
             self.failed.emit(str(exc))
+
+
+class OperationThread(QThread):
+    progress = Signal(int, str)
+
+    def __init__(self, operation, parent=None):
+        super().__init__(parent)
+        self.operation = operation
+        self.result = None
+        self.error = None
+
+    def run(self):
+        try:
+            self.result = self.operation(self.progress.emit)
+        except Exception as exc:
+            self.error = exc
+
+
+class BandMappingDialog(QDialog):
+    def __init__(self, bands, descriptions, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("设置 DN 正射影像波段对应关系")
+        self.setMinimumWidth(520)
+        layout = QFormLayout(self)
+        layout.addRow(QLabel("每个定标波段必须对应一个不同的输入波段。输出按输入编号排序。"))
+        self.combos = {}
+        for band in bands:
+            combo = QComboBox()
+            combo.addItem("请选择输入波段", None)
+            for index, description in enumerate(descriptions, 1):
+                combo.addItem(f"{index}: {description}", index)
+            match = next((i for i, description in enumerate(descriptions, 1)
+                          if band.lower() == description.lower().replace(' ', '')), 0)
+            combo.setCurrentIndex(match)
+            self.combos[band] = combo
+            combo.currentIndexChanged.connect(self._validate)
+            layout.addRow(band, combo)
+        self.clip = QCheckBox("将反射率裁剪到 0～1（不勾选则保留超范围值供检查）")
+        layout.addRow(self.clip)
+        self.validation_label = QLabel()
+        layout.addRow(self.validation_label)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        layout.addRow(self.buttons)
+        self._validate()
+
+    @property
+    def band_map(self):
+        return {band: combo.currentData() for band, combo in self.combos.items()}
+
+    def _validate(self, *_args):
+        if not hasattr(self, 'buttons'):
+            return False
+        values = list(self.band_map.values())
+        selected = [value for value in values if value is not None]
+        duplicates = {value for value in selected if selected.count(value) > 1}
+        for combo in self.combos.values():
+            combo.setStyleSheet('border: 1px solid #d32f2f;' if combo.currentData() in duplicates else '')
+        message = ('输入波段重复，请为红框中的波段选择不同的输入。' if duplicates
+                   else '请完成所有波段选择。' if None in values else '波段对应关系检查通过。')
+        valid = bool(values) and None not in values and not duplicates
+        if valid:
+            order = sorted(self.band_map, key=self.band_map.get)
+            message = '输出顺序：' + ' → '.join(f'{band}（输入 {self.band_map[band]}）' for band in order)
+        self.validation_label.setText(message)
+        self.buttons.button(QDialogButtonBox.Ok).setEnabled(valid)
+        return valid
+
+    def accept(self):
+        if self._validate():
+            super().accept()
 
 
 class RoiDialog(QDialog):
@@ -876,22 +951,54 @@ class MainWindow(QMainWindow):
             self.refresh_roi_table()
             self.canvas.show_rois(self.annotations)
 
-    def calculate(self) -> None:
+    def _start_operation(self, title, operation, completed) -> None:
         if self._busy:
             return
         self._busy = True
         self.main_toolbar.setEnabled(False)
         self.centralWidget().setEnabled(False)
-        try:
-            self._calculate()
-        except Exception as exc:
-            QMessageBox.critical(self, "计算或保存失败", f"{exc}\n当前标注仍保留在窗口中。")
-        finally:
-            self._busy = False
-            self.main_toolbar.setEnabled(True)
-            self.centralWidget().setEnabled(True)
+        self.progress_dialog = QProgressDialog(title, "", 0, 100, self)
+        self.progress_dialog.setCancelButton(None)
+        self.progress_dialog.setWindowModality(Qt.WindowModal)
+        self.progress_dialog.setAutoClose(False)
+        self.progress_dialog.setAutoReset(False)
+        self.progress_dialog.setMinimumDuration(0)
+        self.progress_dialog.setWindowTitle(title)
+        self.progress_dialog.setValue(0)
+        self.progress_dialog.show()
+        self.operation_thread = OperationThread(operation, self)
+        self._operation_completed = completed
+        self.operation_thread.progress.connect(self._operation_progress)
+        self.operation_thread.finished.connect(self._operation_finished)
+        self.operation_thread.start()
+
+    def _operation_progress(self, value, message):
+        self.progress_dialog.setLabelText(message)
+        self.progress_dialog.setValue(value)
+        self.statusBar().showMessage(message)
+
+    def _operation_finished(self):
+        worker = self.operation_thread
+        self.progress_dialog.close()
+        self.progress_dialog.deleteLater()
+        self._busy = False
+        self.main_toolbar.setEnabled(True)
+        self.centralWidget().setEnabled(True)
+        self.operation_thread = None
+        worker.deleteLater()
+        if worker.error is not None:
+            self.statusBar().showMessage("处理失败")
+            QMessageBox.critical(self, "处理失败", str(worker.error) + "\n当前标注和已有系数仍保留。")
+        else:
+            self.statusBar().showMessage("处理完成")
+            self._operation_completed(worker.result)
+
+    def calculate(self) -> None:
+        self._calculate()
 
     def _calculate(self) -> None:
+        if self._busy:
+            return
         if not self.catalog or not self.annotations:
             QMessageBox.information(self, "数据不足", "请先在 RGB 照片上添加至少一个 ROI。")
             return
@@ -902,98 +1009,20 @@ class MainWindow(QMainWindow):
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
         ) != QMessageBox.Yes:
             return
+        catalog, annotations = deepcopy(self.catalog), deepcopy(self.annotations)
+        self._start_operation("计算并保存系数",
+                              lambda progress: calculate_coefficients(catalog, annotations, progress),
+                              self._calculation_completed)
 
-        generated: list[RoiSample] = []
-        registration_cache = {}
-        review_records: list[str] = []
-        enabled_annotations = [item for item in self.annotations if item.enabled]
-        for annotation_index, annotation in enumerate(enabled_annotations, 1):
-            capture = next((item for item in self.catalog.captures if item.key == annotation.capture_key), None)
-            if capture is None:
-                QMessageBox.warning(self, "曝光组缺失", f"找不到 {annotation.roi_id} 对应的曝光组。")
-                return
-            missing = [band for band in self.catalog.expected_bands if band not in capture.files]
-            if missing:
-                QMessageBox.warning(
-                    self,
-                    "波段不完整",
-                    f"{annotation.roi_id} 对应曝光组缺少：{', '.join(missing)}。\n请改用包含完整波段的 RGB 照片。",
-                )
-                return
-            for band_index, band in enumerate(self.catalog.expected_bands, 1):
-                self.statusBar().showMessage(
-                    f"正在配准 {annotation.roi_id} → {band}（{annotation_index}/{len(enabled_annotations)}）……"
-                )
-                QApplication.processEvents()
-                cache_key = (capture.key, band)
-                if cache_key not in registration_cache:
-                    registration_cache[cache_key] = register_rgb_to_band(capture.files["RGB"], capture.files[band])
-                registration = registration_cache[cache_key]
-                if (
-                    registration.method.endswith("Fallback")
-                    or (registration.method == "ORB-Homography" and registration.score < 0.35)
-                    or (registration.method == "ECC-Affine" and registration.score < 0.5)
-                ):
-                    review_records.append(
-                        f"{annotation.roi_id}/{band} ({registration.method}, {registration.score:.3f})"
-                    )
-                mapped_polygon = transform_polygon(annotation.polygon, registration.matrix)
-                try:
-                    stats = roi_statistics(capture.files[band], mapped_polygon)
-                except Exception as exc:
-                    QMessageBox.warning(
-                        self,
-                        "配准后的 ROI 无效",
-                        f"{annotation.roi_id} → {band} 无法统计：{exc}\n"
-                        f"配准方法：{registration.method}，质量：{registration.score:.3f}",
-                    )
-                    return
-                generated.append(
-                    RoiSample(
-                        roi_id=f"{annotation.roi_id}-{band}",
-                        capture_key=capture.key,
-                        image_path=str(capture.files[band]),
-                        band=band,
-                        panel_id=annotation.panel_id,
-                        polygon=mapped_polygon,
-                        reflectance=annotation.reflectance_by_band[band],
-                        source_rgb_roi_id=annotation.roi_id,
-                        source_rgb_path=annotation.image_path,
-                        source_rgb_polygon=annotation.polygon,
-                        registration_method=registration.method,
-                        registration_score=registration.score,
-                        **stats,
-                    )
-                )
-
-        self.samples = generated
-        self.models = fit_models(self.samples)
-        if not self.models:
-            QMessageBox.warning(self, "无法拟合", "配准后没有可用于拟合的有效波段 ROI。")
-            return
-        output = save_coefficients(
-            self.project_dir,
-            self.catalog.root,
-            self.catalog.sensor,
-            self.samples,
-            self.models,
-            rgb_annotations=self.annotations,
-        )
+    def _calculation_completed(self, result):
+        self.samples, self.models, output, review = result
         lines = []
         for band, model in self.models.items():
             r2 = "N/A" if model.r_squared is None else f"{model.r_squared:.4f}"
             lines.append(f"{band}: ρ={model.slope:.9g}×DN{model.intercept:+.9g}；n={model.sample_count}；R²={r2}")
-        methods = sorted({sample.registration_method or "unknown" for sample in self.samples})
-        lines.append(f"配准：{len(registration_cache)} 个影像对；方法 {', '.join(methods)}")
         self.model_label.setText("\n".join(lines))
-        fallback_note = ""
-        if review_records:
-            fallback_note = "\n\n注意：以下配准质量较低或使用了后备方法，请重点复核：\n" + ", ".join(review_records)
-        QMessageBox.information(
-            self,
-            "定标系数已保存",
-            f"已完成 RGB→多光谱配准并保存：\n{output}\n\n文件名固定为：\n{COEFFICIENTS_FILENAME}{fallback_note}",
-        )
+        note = "\n\n请复核低质量配准：\n" + ", ".join(review) if review else ""
+        QMessageBox.information(self, "定标系数已保存", f"已保存：\n{output}{note}")
 
     def load_project(self) -> None:
         if self._busy or not self._confirm_discard():
@@ -1017,6 +1046,8 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "载入失败", str(exc))
 
     def apply_to_orthophoto(self) -> None:
+        if self._busy:
+            return
         if not self.models:
             QMessageBox.information(self, "尚无系数", "请先计算系数或载入 radiometric_calibration_coefficients.json。")
             return
@@ -1030,14 +1061,10 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "GeoTIFF 读取失败", str(exc))
             return
-        options = [f"{index}: {description}" for index, description in enumerate(descriptions, 1)]
-        band_map: dict[str, int] = {}
-        for band in self.models:
-            default = next((i for i, description in enumerate(descriptions) if band.lower() == description.lower().replace(" ", "")), 0)
-            choice, ok = QInputDialog.getItem(self, "映射 GeoTIFF 波段", f"请选择 {band} 对应的输入波段：", options, default, False)
-            if not ok:
-                return
-            band_map[band] = int(choice.split(":", 1)[0])
+        mapping = BandMappingDialog(self.models, descriptions, self)
+        if mapping.exec() != QDialog.Accepted:
+            return
+        band_map = mapping.band_map
         output, _ = QFileDialog.getSaveFileName(
             self,
             "保存 Float32 反射率正射影像",
@@ -1046,12 +1073,13 @@ class MainWindow(QMainWindow):
         )
         if not output:
             return
-        clip = QMessageBox.question(self, "反射率范围", "是否将输出裁剪到 0～1？\n选择“否”可以保留超范围值用于质量检查。") == QMessageBox.Yes
-        try:
-            apply_models(source, output, {band: model.to_dict() for band, model in self.models.items()}, band_map, clip)
-        except Exception as exc:
-            QMessageBox.critical(self, "转换失败", str(exc))
-            return
+        models = {band: model.to_dict() for band, model in self.models.items()}
+        clip = mapping.clip.isChecked()
+        self._start_operation("应用到 DN 正射影像",
+                              lambda progress: apply_models(source, output, models, band_map, clip, progress),
+                              self._orthophoto_completed)
+
+    def _orthophoto_completed(self, output):
         QMessageBox.information(self, "处理完成", f"已生成 Float32 反射率 GeoTIFF：\n{output}")
 
 

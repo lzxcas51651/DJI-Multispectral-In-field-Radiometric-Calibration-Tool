@@ -2,6 +2,8 @@ import os
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 import tempfile
+import time
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -10,9 +12,11 @@ import numpy as np
 from PySide6.QtCore import QEvent, QPoint, QPointF, QSettings, Qt
 from PySide6.QtGui import QImage, QMouseEvent, QWheelEvent
 from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QDialogButtonBox
 
 from radiometric_calibrator.catalog import Catalog, Capture
-from radiometric_calibrator.gui import ImageCanvas, MainWindow, RoiDialog, load_preview
+from radiometric_calibrator.gui import BandMappingDialog, ImageCanvas, MainWindow, RoiDialog, load_preview
 from radiometric_calibrator.registration import RegistrationResult
 from radiometric_calibrator.roi import RgbRoiAnnotation
 
@@ -32,12 +36,61 @@ class GuiRegressionTests(unittest.TestCase):
         self.window = MainWindow(QSettings(str(self.root / 'preferences.ini'), QSettings.IniFormat))
 
     def tearDown(self):
+        self.wait_operation()
         self.window._retire_workers()
         for thread in self.window._retired_threads:
             thread.wait(5000)
         self.window.close()
         self.app.processEvents()
         self.temp.cleanup()
+
+    def wait_operation(self):
+        deadline = time.monotonic() + 10
+        while self.window._busy and time.monotonic() < deadline:
+            QTest.qWait(10)
+        self.assertFalse(self.window._busy)
+
+    def test_band_mapping_requires_complete_unique_choices(self):
+        dialog = BandMappingDialog(['Green', 'Red'], ['Band 1', 'Band 2'])
+        button = dialog.buttons.button(QDialogButtonBox.Ok)
+        self.assertFalse(button.isEnabled())
+        dialog.combos['Green'].setCurrentIndex(1)
+        dialog.combos['Red'].setCurrentIndex(1)
+        self.assertFalse(button.isEnabled())
+        self.assertIn('重复', dialog.validation_label.text())
+        dialog.combos['Red'].setCurrentIndex(2)
+        self.assertTrue(button.isEnabled())
+        self.assertEqual(dialog.band_map, {'Green': 1, 'Red': 2})
+        reverse = BandMappingDialog(['Red', 'Green'], ['Green', 'Red'])
+        self.assertEqual(reverse.validation_label.text(), '输出顺序：Green（输入 1） → Red（输入 2）')
+
+    def test_background_operation_keeps_event_loop_responsive_and_handles_error(self):
+        main_thread = threading.get_ident()
+        seen = []
+        release = threading.Event()
+        def operation(progress):
+            self.assertNotEqual(threading.get_ident(), main_thread)
+            progress(25, 'working')
+            release.wait(3)
+            return 42
+        self.window._start_operation('test', operation, seen.append)
+        try:
+            deadline = time.monotonic() + 2
+            while self.window.progress_dialog.value() != 25 and time.monotonic() < deadline:
+                QTest.qWait(10)
+            self.assertTrue(self.window._busy)
+            self.assertEqual(self.window.progress_dialog.value(), 25)
+        finally:
+            release.set()
+        self.wait_operation()
+        self.assertEqual(seen, [42])
+        def failure(progress):
+            raise ValueError('test error')
+        with patch.object(QMessageBox, 'critical') as message:
+            self.window._start_operation('test', failure, seen.append)
+            self.wait_operation()
+            message.assert_called_once()
+        self.assertTrue(self.window.centralWidget().isEnabled())
 
     def annotation(self):
         return RgbRoiAnnotation('ROI-001', 'capture', str(self.photo), 'panel',
@@ -142,17 +195,18 @@ class GuiRegressionTests(unittest.TestCase):
         self.window.annotations = [self.annotation()]
         stats = dict(pixel_count=100, mean=1000., median=1000., trimmed_mean=1000., stddev=1.,
                      cv_percent=0.1, minimum=999., maximum=1001.)
-        with patch('radiometric_calibrator.gui.register_rgb_to_band', return_value=RegistrationResult(np.eye(3), 'test', 1.0)), \
-             patch('radiometric_calibrator.gui.roi_statistics', return_value=stats), \
+        with patch('radiometric_calibrator.processing.register_rgb_to_band', return_value=RegistrationResult(np.eye(3), 'test', 1.0)), \
+             patch('radiometric_calibrator.processing.roi_statistics', return_value=stats), \
              patch('radiometric_calibrator.gui.QFileDialog.getExistingDirectory', side_effect=AssertionError('unexpected folder dialog')), \
              patch.object(QMessageBox, 'information'):
             self.window._calculate()
+            self.wait_operation()
         target = self.root / 'radiometric_calibration_coefficients.json'
         self.assertTrue(target.is_file())
         self.assertFalse(any(path.is_dir() for path in self.root.iterdir()))
         previous = target.read_bytes()
         with patch.object(QMessageBox, 'question', return_value=QMessageBox.No), \
-             patch('radiometric_calibrator.gui.register_rgb_to_band') as registration:
+             patch('radiometric_calibrator.processing.register_rgb_to_band') as registration:
             self.window._calculate()
             registration.assert_not_called()
         self.assertEqual(target.read_bytes(), previous)

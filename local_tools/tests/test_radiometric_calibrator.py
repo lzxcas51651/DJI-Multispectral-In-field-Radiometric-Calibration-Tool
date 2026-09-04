@@ -72,6 +72,28 @@ class CatalogTests(unittest.TestCase):
 
 
 class CalibrationTests(unittest.TestCase):
+    def test_output_band_order_follows_source_not_models(self):
+        import rasterio
+        from rasterio.transform import from_origin
+        with tempfile.TemporaryDirectory() as directory:
+            source, output = Path(directory) / 'dn.tif', Path(directory) / 'out.tif'
+            with rasterio.open(source, 'w', driver='GTiff', width=2, height=2,
+                               count=3, dtype='uint16', transform=from_origin(10, 20, 1, 1)) as dst:
+                for index in range(1, 4):
+                    dst.write(np.full((2, 2), index * 100, dtype='uint16'), index)
+            model = {'slope': 0.001, 'intercept': 0, 'method': 'test'}
+            # Deliberately reversed coefficient and mapping insertion order.
+            models = {'NIR': model, 'Red': model, 'Green': model}
+            apply_models(source, output, models, {'NIR': 3, 'Red': 2, 'Green': 1})
+            with rasterio.open(output) as dst:
+                self.assertEqual(dst.descriptions, ('Green', 'Red', 'NIR'))
+                np.testing.assert_allclose(dst.read()[:, 0, 0], [0.1, 0.2, 0.3], rtol=1e-6)
+                self.assertEqual(dst.tags(3)['source_band_index'], '3')
+            apply_models(source, output, {'NIR': model, 'Green': model}, {'NIR': 3, 'Green': 1})
+            with rasterio.open(output) as dst:
+                self.assertEqual(dst.descriptions, ('Green', 'NIR'))
+                self.assertEqual(dst.tags(2)['source_band_index'], '3')
+
     def test_single_level_fits_through_origin(self):
         models = fit_models([sample("ROI-001", "Red", 1000, 0.5), sample("ROI-002", "Red", 1000, 0.5)])
         self.assertAlmostEqual(models["Red"].slope, 0.0005)
@@ -142,7 +164,21 @@ class CalibrationTests(unittest.TestCase):
                     "method": "linear_least_squares",
                 }
             }
-            apply_models(source, output, models, {"Green": 1})
+            updates = []
+            apply_models(source, output, models, {"Green": 1}, progress=lambda p, m: updates.append(p))
+            self.assertEqual(updates[-1], 100)
+            self.assertEqual(updates, sorted(updates))
+            previous = output.read_bytes()
+            with self.assertRaises(ValueError):
+                apply_models(source, output, {**models, 'Red': models['Green']}, {'Green': 1, 'Red': 1})
+            with self.assertRaises(ValueError):
+                apply_models(source, source, models, {'Green': 1})
+            with self.assertRaises(ValueError):
+                apply_models(source, output, models, {'Green': 2})
+            with self.assertRaises(KeyError):
+                apply_models(source, output, {'Green': {}}, {'Green': 1})
+            self.assertEqual(output.read_bytes(), previous)
+            self.assertFalse(list(output.parent.glob('.reflectance-*')))
             with rasterio.open(output) as dataset:
                 self.assertEqual(dataset.dtypes[0], "float32")
                 self.assertEqual(dataset.descriptions[0], "Green")
