@@ -8,7 +8,7 @@ import numpy as np
 from radiometric_calibrator.calibration import fit_models
 from radiometric_calibrator.candidate import find_candidates
 from radiometric_calibrator.catalog import scan_folder
-from radiometric_calibrator.geotiff import apply_models
+from radiometric_calibrator.geotiff import apply_models, describe_bands
 from radiometric_calibrator.metadata import read_image_metadata
 from radiometric_calibrator.project import COEFFICIENTS_FILENAME, save_coefficients
 from radiometric_calibrator.registration import register_rgb_to_band, transform_polygon
@@ -72,6 +72,18 @@ class CatalogTests(unittest.TestCase):
 
 
 class CalibrationTests(unittest.TestCase):
+    def test_alpha_recognized_from_color_interpretation(self):
+        import rasterio
+        from rasterio.enums import ColorInterp
+        from rasterio.transform import from_origin
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'alpha.tif'
+            with rasterio.open(path, 'w', driver='GTiff', width=2, height=2, count=2,
+                               dtype='uint16', transform=from_origin(10, 20, 1, 1)) as dst:
+                dst.write(np.ones((2, 2, 2), dtype='uint16'))
+                dst.colorinterp = (ColorInterp.gray, ColorInterp.alpha)
+            self.assertEqual(describe_bands(path)[-1], 'Alpha')
+
     def test_output_band_order_follows_source_not_models(self):
         import rasterio
         from rasterio.transform import from_origin

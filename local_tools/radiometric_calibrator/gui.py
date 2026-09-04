@@ -176,8 +176,13 @@ class BandMappingDialog(QDialog):
         self.fixed_order = orders.get(sensor)
         self.mapping_error = ''
         if self.fixed_order:
+            self.ignored_alpha = (len(descriptions) == len(self.fixed_order) + 1
+                                  and 'alpha' in descriptions[-1].lower())
+            if self.ignored_alpha:
+                layout.addRow(QLabel(f"已忽略末尾第 {len(descriptions)} 波段 Alpha（透明度），不参与定标或输出。"))
+                descriptions = descriptions[:-1]
             if len(descriptions) != len(self.fixed_order) or set(bands) != set(self.fixed_order):
-                self.mapping_error = f'{sensor} 需要 {len(self.fixed_order)} 个输入波段及完整的对应定标系数，请检查文件。'
+                self.mapping_error = f'{sensor} 需要 {len(self.fixed_order)} 个光谱波段及完整系数；可附带末尾 Alpha。请检查文件。'
             layout.addRow(QLabel(f"{sensor} 固定波段对应关系（不重排）：输入波段 i → 输出波段 i。"))
             bands = self.fixed_order
         else:
@@ -1035,12 +1040,19 @@ class MainWindow(QMainWindow):
     def _calculation_completed(self, result):
         self.samples, self.models, output, review = result
         lines = []
-        for band, model in self.models.items():
+        for band, model in self._ordered_models():
             r2 = "N/A" if model.r_squared is None else f"{model.r_squared:.4f}"
             lines.append(f"{band}: ρ={model.slope:.9g}×DN{model.intercept:+.9g}；n={model.sample_count}；R²={r2}")
         self.model_label.setText("\n".join(lines))
         note = "\n\n请复核低质量配准：\n" + ", ".join(review) if review else ""
         QMessageBox.information(self, "定标系数已保存", f"已保存：\n{output}{note}")
+
+    def _ordered_models(self):
+        order = BANDS.get(self.catalog.sensor if self.catalog else '',
+                          ('Blue', 'Green', 'Red', 'RedEdge', 'NIR'))
+        names = [band for band in order if band in self.models]
+        names += [band for band in self.models if band not in names]
+        return [(band, self.models[band]) for band in names]
 
     def load_project(self) -> None:
         if self._busy or not self._confirm_discard():
@@ -1059,7 +1071,7 @@ class MainWindow(QMainWindow):
             self.project_dir = Path(filename).parent
             self.settings.setValue("last_project_dir", str(self.project_dir))
             self._populate_catalog()
-            self.model_label.setText("已载入：\n" + "\n".join(f"{b}: ρ={m.slope:.9g}×DN{m.intercept:+.9g}" for b, m in self.models.items()))
+            self.model_label.setText("已载入：\n" + "\n".join(f"{b}: ρ={m.slope:.9g}×DN{m.intercept:+.9g}" for b, m in self._ordered_models()))
         except Exception as exc:
             QMessageBox.critical(self, "载入失败", str(exc))
 

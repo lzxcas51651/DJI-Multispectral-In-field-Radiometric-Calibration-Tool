@@ -45,7 +45,8 @@ def copy_source_metadata(source, target, band_map, ordered_bands):
 
 def describe_bands(path: str | Path) -> list[str]:
     with rasterio.open(path) as source:
-        return [description or f"Band {index}" for index, description in enumerate(source.descriptions, 1)]
+        return [('Alpha' if source.colorinterp[index-1] == rasterio.enums.ColorInterp.alpha
+                 else description or f"Band {index}") for index, description in enumerate(source.descriptions, 1)]
 
 
 def apply_models(

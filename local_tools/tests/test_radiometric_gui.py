@@ -57,6 +57,11 @@ class GuiRegressionTests(unittest.TestCase):
             self.assertEqual(fixed.band_map, {band: i for i, band in enumerate(order, 1)})
             self.assertTrue(fixed.buttons.button(QDialogButtonBox.Ok).isEnabled())
             self.assertTrue(all(not combo.isEnabled() for combo in fixed.combos.values()))
+            alpha = BandMappingDialog(order, ['Band'] * len(order) + ['Alpha'], sensor=sensor)
+            self.assertTrue(alpha.buttons.button(QDialogButtonBox.Ok).isEnabled())
+            self.assertEqual(alpha.band_map, fixed.band_map)
+            extra = BandMappingDialog(order, ['Band'] * (len(order)+1), sensor=sensor)
+            self.assertFalse(extra.buttons.button(QDialogButtonBox.Ok).isEnabled())
             mismatch = BandMappingDialog(order, ['Band'], sensor=sensor)
             self.assertFalse(mismatch.buttons.button(QDialogButtonBox.Ok).isEnabled())
         dialog = BandMappingDialog(['Green', 'Red'], ['Band 1', 'Band 2'])
@@ -71,6 +76,14 @@ class GuiRegressionTests(unittest.TestCase):
         self.assertEqual(dialog.band_map, {'Green': 1, 'Red': 2})
         reverse = BandMappingDialog(['Red', 'Green'], ['Green', 'Red'])
         self.assertEqual(reverse.validation_label.text(), '输出顺序：Green（输入 1） → Red（输入 2）')
+
+    def test_coefficient_display_uses_sensor_order(self):
+        self.window.catalog = self.catalog()
+        self.window.models = {band: object() for band in ('NIR', 'RedEdge', 'Red', 'Green')}
+        self.assertEqual([band for band, _ in self.window._ordered_models()], ['Green', 'Red', 'RedEdge', 'NIR'])
+        self.window.catalog.sensor = 'P4M'
+        self.window.models['Blue'] = object()
+        self.assertEqual([band for band, _ in self.window._ordered_models()], ['Blue', 'Green', 'Red', 'RedEdge', 'NIR'])
 
     def test_background_operation_keeps_event_loop_responsive_and_handles_error(self):
         main_thread = threading.get_ident()
