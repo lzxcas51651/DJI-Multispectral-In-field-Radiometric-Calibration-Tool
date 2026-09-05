@@ -1,12 +1,12 @@
 # DJI Multispectral In-field Radiometric Calibration Tool
 
-DJI P4M / M3M 多光谱现场辐射定标工具，独立 Windows 桌面程序。当前版本 **2.1.1**。
+DJI P4M / M3M 多光谱现场辐射定标工具，独立 Windows 桌面程序。当前版本 **2.2.0**。
 
-### v2.1.1 后台处理与进度
+### v2.2.0 后台处理与进度
 
-v2.1.1 更新：P4M 可输入 5 个光谱波段加末尾 Alpha，M3M 可输入 4 个光谱波段加末尾 Alpha。Alpha 通过 TIFF 颜色解释或包含 Alpha 的波段描述识别，不需要系数，也不作为输出光谱波段。未识别的额外波段仍禁止继续。右侧系数列表（计算后及载入后）均按 Blue、Green、Red、RedEdge、NIR 显示，M3M 不含 Blue；这仅改变显示顺序，不改变系数值。
+v2.2.0 更新：P4M 可输入 5 个光谱波段加末尾 Alpha，M3M 可输入 4 个光谱波段加末尾 Alpha。Alpha 通过 TIFF 颜色解释或包含 Alpha 的波段描述识别，不需要系数，也不作为输出光谱波段。未识别的额外波段仍禁止继续。右侧系数列表（计算后及载入后）均按 Blue、Green、Red、RedEdge、NIR 显示，M3M 不含 Blue；这仅改变显示顺序，不改变系数值。
 
-v2.1.1 固定波段约定：P4M 固定对应输入/输出 1～5 为 Blue、Green、Red、RedEdge、NIR；M3M 对应 1～4 为 Green、Red、RedEdge、NIR。映射窗口仅确认该约定，不交换波段；输入数量或系数不完整时禁止继续。该约定要求输入确实来自此固定顺序的拼接流程，文件描述显示供核对。
+v2.2.0 固定波段约定：P4M 固定对应输入/输出 1～5 为 Blue、Green、Red、RedEdge、NIR；M3M 对应 1～4 为 Green、Red、RedEdge、NIR。映射窗口仅确认该约定，不交换波段；输入数量或系数不完整时禁止继续。该约定要求输入确实来自此固定顺序的拼接流程，文件描述显示供核对。
 
 输出保留输入 DN 正射 TIFF 的空间参考及可复制的文件级/波段级标签、自定义元数据域。原始标签、描述、单位、缩放系数等另存到 TIFF 内的 SOURCE_METADATA/original_json。DN 统计值、NoData、缩放和单位不能直接作为反射率属性沿用：输出采用 Float32/NaN、单位反射率、缩放 1/偏移 0，原值留作来源记录。压缩、分块等结构信息由输出重新生成，XML 元数据存入来源记录；外部 sidecar 文件不会自动复制。
 
@@ -24,16 +24,18 @@ DN 正射波段映射改为同一个窗口：每个定标波段选择对应输�
 
 在 RGB 照片上勾选定标布，填写各波段的已知反射率，程序在计算时自动关联多光谱影像、配准 ROI、统计 DN 并拟合定标系数。也可将系数应用到 DN 多波段正射影像，输出 Float32 反射率 GeoTIFF。
 
+自动查找完成且存在结果时，左侧自动切换为“自动查找的定标布候选”，显示全部候选 RGB 图片；“影像显示”可随时切换回全部 RGB 影像。应用到 DN 正射影像时，默认输出在输入文件同目录，名称为 `<输入文件名>_ref.tif`，保存前仍可修改。
+
 本工具是独立项目，非 DJI 官方软件；不内置 WebODM，不负责影像拼接，不是热红外温度转换工具。
 
 ## 下载安装
 
-进入 [Releases](https://github.com/lzxcas51651/DJI-Multispectral-In-field-Radiometric-Calibration-Tool/releases)，下载 `DJI_Radiometric_Calibrator_2.1.1_x64.msi`。只需传输这个安装文件，不需要另复制运行库。若仓库为私有，需使用有权限的 GitHub 账号登录。
+进入 [Releases](https://github.com/lzxcas51651/DJI-Multispectral-In-field-Radiometric-Calibration-Tool/releases)，下载 `DJI_Radiometric_Calibrator_2.2.0_x64.msi`。只需传输这个安装文件，不需要另复制运行库。若仓库为私有，需使用有权限的 GitHub 账号登录。
 
 - 目标环境：Windows 10 1809+ / Windows 11，x64；其他系统未验证。
 - 运行软件无需安装 Python、.NET SDK、WSL、Docker 或 DJI Thermal SDK。
 - 安装需要管理员权限，支持选择目录、桌面/开始菜单快捷方式。
-- 已安装 1.0.0 的用户：关闭旧程序，运行 2.1.1 安装包升级。
+- 已安装 1.0.0 的用户：关闭旧程序，运行 2.2.0 安装包升级。
 - 修复：重新运行同版本 MSI，选择修复；卸载：Windows“已安装的应用”，或 MSI 维护界面。
 - 卸载不删除原始影像、定标项目或用户偏好设置。
 - 安装包暂未数字签名，可能显示未知发布者。核对来源和 Release 的 SHA256，不要关闭系统安全保护。
@@ -116,7 +118,7 @@ cd D:\Code\DJI-Radiometric\local_tools
 ```powershell
 powershell -ExecutionPolicy Bypass -File `
   local_tools\radiometric_calibrator\build_windows_installer.ps1 `
-  -Version 2.1.1 -UseStandaloneWix
+  -Version 2.2.0 -UseStandaloneWix
 ```
 
 该命令构建隔离 EXE、下载固定 WiX 工具、生成文件清单、做启动自检并编译/检查 MSI；不会自动安装软件。输出位于 `local_tools/radiometric_calibrator/installer/release/`。已有最新 EXE 时可加 `-SkipExeBuild`。发布新版本需递增三段版本号，保留稳定的 UpgradeCode。工具、依赖、生成目录与安装包不进入 Git；安装包上传 Release。

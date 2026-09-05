@@ -13,9 +13,10 @@ from PySide6.QtCore import QEvent, QPoint, QPointF, QSettings, Qt
 from PySide6.QtGui import QImage, QMouseEvent, QWheelEvent
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QDialogButtonBox
+from PySide6.QtWidgets import QDialog, QDialogButtonBox, QFileDialog
 
 from radiometric_calibrator.catalog import Catalog, Capture
+from radiometric_calibrator.candidate import Candidate
 from radiometric_calibrator.gui import BandMappingDialog, ImageCanvas, MainWindow, RoiDialog, load_preview
 from radiometric_calibrator.registration import RegistrationResult
 from radiometric_calibrator.roi import RgbRoiAnnotation
@@ -84,6 +85,38 @@ class GuiRegressionTests(unittest.TestCase):
         self.window.catalog.sensor = 'P4M'
         self.window.models['Blue'] = object()
         self.assertEqual([band for band, _ in self.window._ordered_models()], ['Blue', 'Green', 'Red', 'RedEdge', 'NIR'])
+
+    def test_candidate_results_filter_list_and_can_switch_back_to_all(self):
+        second = self.root / 'second.jpg'
+        second.write_bytes(self.photo.read_bytes())
+        self.window.catalog = self.catalog()
+        second_capture = Capture('second', {'RGB': second})
+        self.window.catalog.captures.append(second_capture)
+        self.window._populate_catalog()
+        self.assertEqual(self.window.capture_list.count(), 2)
+        with patch.object(QMessageBox, 'information'):
+            self.window.show_candidates([Candidate(second.resolve(), 0.91, None)])
+        self.assertEqual(self.window.image_filter.currentData(), 'candidates')
+        self.assertEqual(self.window.capture_list.count(), 1)
+        self.assertEqual(self.window.capture_list.item(0).data(Qt.UserRole), 'second')
+        self.window.image_filter.setCurrentIndex(self.window.image_filter.findData('all'))
+        self.assertEqual(self.window.capture_list.count(), 2)
+
+    def test_orthophoto_default_output_is_source_directory_with_ref_suffix(self):
+        import rasterio
+        from rasterio.transform import from_origin
+        source = self.root / 'survey.multi.tif'
+        with rasterio.open(source, 'w', driver='GTiff', width=2, height=2, count=4,
+                           dtype='uint16', transform=from_origin(10, 20, 1, 1)) as dst:
+            dst.write(np.ones((4, 2, 2), dtype='uint16'))
+        self.window.catalog = self.catalog()
+        model = type('Model', (), {'to_dict': lambda self: {'slope': .1, 'intercept': 0, 'method': 'test'}})
+        self.window.models = {band: model() for band in ('Green', 'Red', 'RedEdge', 'NIR')}
+        with patch.object(QFileDialog, 'getOpenFileName', return_value=(str(source), '')), \
+             patch.object(BandMappingDialog, 'exec', return_value=QDialog.Accepted), \
+             patch.object(QFileDialog, 'getSaveFileName', return_value=('', '')) as save:
+            self.window.apply_to_orthophoto()
+        self.assertEqual(Path(save.call_args.args[2]), self.root / 'survey.multi_ref.tif')
 
     def test_background_operation_keeps_event_loop_responsive_and_handles_error(self):
         main_thread = threading.get_ident()

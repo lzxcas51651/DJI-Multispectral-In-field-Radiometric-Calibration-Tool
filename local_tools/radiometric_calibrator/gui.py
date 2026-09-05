@@ -27,7 +27,6 @@ from PySide6.QtWidgets import (
     QGraphicsView,
     QHBoxLayout,
     QHeaderView,
-    QInputDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -559,6 +558,8 @@ class MainWindow(QMainWindow):
         self.project_dir: Path | None = None
         self.thumbnail_thread: ThumbnailThread | None = None
         self.candidate_thread: CandidateThread | None = None
+        self.candidate_keys: set[str] = set()
+        self.candidate_scores: dict[str, float] = {}
         self._retired_threads = []
         self._generation = 0
         self._busy = False
@@ -600,6 +601,14 @@ class MainWindow(QMainWindow):
         self.sensor_info = QLabel("尚未打开批次")
         self.sensor_info.setWordWrap(True)
         left_layout.addWidget(self.sensor_info)
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(QLabel("影像显示"))
+        self.image_filter = QComboBox()
+        self.image_filter.addItem("全部 RGB 影像", "all")
+        self.image_filter.addItem("自动查找的定标布候选", "candidates")
+        self.image_filter.currentIndexChanged.connect(self._filter_changed)
+        filter_row.addWidget(self.image_filter, 1)
+        left_layout.addLayout(filter_row)
         self.capture_list = QListWidget()
         self.capture_list.setViewMode(QListView.IconMode)
         self.capture_list.setFlow(QListView.TopToBottom)
@@ -712,6 +721,8 @@ class MainWindow(QMainWindow):
         self._retire_workers()
         self.catalog = self.current_capture = None
         self.annotations, self.samples, self.models = [], [], {}
+        self.candidate_keys.clear()
+        self.candidate_scores.clear()
         self.project_dir = None
         self.capture_list.clear()
         self.canvas.clear_photo()
@@ -722,6 +733,9 @@ class MainWindow(QMainWindow):
         self.sensor_combo.setCurrentText("AUTO")
         self.sensor_info.setText("尚未打开批次")
         self.model_label.setText("尚未计算定标系数")
+        self.image_filter.blockSignals(True)
+        self.image_filter.setCurrentIndex(0)
+        self.image_filter.blockSignals(False)
 
     def clear_task(self) -> None:
         if self._busy or not self._confirm_discard():
@@ -753,11 +767,15 @@ class MainWindow(QMainWindow):
         self._retire_workers()
         generation = self._generation
         self.capture_list.clear()
-        rgb_captures = [capture for capture in self.catalog.captures if "RGB" in capture.files]
+        all_rgb = [capture for capture in self.catalog.captures if "RGB" in capture.files]
+        candidates_only = self.image_filter.currentData() == "candidates"
+        rgb_captures = ([capture for capture in all_rgb if capture.key in self.candidate_keys]
+                        if candidates_only else all_rgb)
         for capture in rgb_captures:
             item = QListWidgetItem(QIcon(), capture.files["RGB"].name)
             item.setData(Qt.UserRole, capture.key)
-            available = ", ".join(capture.files)
+            score = self.candidate_scores.get(capture.key)
+            available = ", ".join(capture.files) + (f"\n定标布候选评分：{score:.2f}" if score is not None else "")
             item.setToolTip(available)
             self.capture_list.addItem(item)
         complete = len(self.catalog.complete_captures)
@@ -776,9 +794,19 @@ class MainWindow(QMainWindow):
         self.thumbnail_thread.start()
         self.refresh_roi_table()
         if not rgb_captures:
+            self.current_capture = None
+            self.canvas.clear_photo(clear_cache=False)
+            if candidates_only:
+                self.statusBar().showMessage("当前没有定标布候选。点击“自动查找定标布”，或切换为“全部 RGB 影像”。")
+                return
             self.statusBar().showMessage("该批次没有可显示的 RGB 照片；左侧按要求不显示单波段影像。")
             return
-        self.statusBar().showMessage("批次已打开。需要自动推荐时再点击“自动查找定标布”。")
+        mode = "定标布候选" if candidates_only else "全部 RGB 影像"
+        self.statusBar().showMessage(f"左侧正在显示 {len(rgb_captures)} 张{mode}。")
+
+    def _filter_changed(self) -> None:
+        if self.catalog:
+            self._populate_catalog()
 
     def set_thumbnail(self, key: str, image: QImage) -> None:
         item = self._item_for_capture(key)
@@ -891,19 +919,26 @@ class MainWindow(QMainWindow):
     def show_candidates(self, candidates: list[Candidate]) -> None:
         self.statusBar().showMessage(f"自动查找完成，得到 {len(candidates)} 个候选。")
         if not candidates:
+            self.candidate_keys.clear()
+            self.candidate_scores.clear()
             QMessageBox.information(self, "没有候选", "没有发现明显的规则定标布，请使用缩略图或手动导入。")
             return
-        labels = [f"{item.path.name}    评分 {item.score:.2f}" for item in candidates]
-        choice, ok = QInputDialog.getItem(self, "定标布候选（需要人工确认）", "选择要打开的影像：", labels, 0, False)
-        if not ok:
-            return
-        candidate = candidates[labels.index(choice)]
-        capture = next((c for c in self.catalog.captures if candidate.path in c.files.values()), None)
-        if capture:
-            item = self._item_for_capture(capture.key)
-            if item:
-                self.capture_list.setCurrentItem(item)
-        QMessageBox.information(self, "候选已打开", "自动结果只是 RGB 候选。请在中间工作区人工确认后绘制 ROI。")
+        self.candidate_keys.clear()
+        self.candidate_scores.clear()
+        candidate_paths = {item.path.resolve(): item.score for item in candidates}
+        for capture in self.catalog.captures:
+            rgb = capture.files.get("RGB")
+            if rgb and rgb.resolve() in candidate_paths:
+                self.candidate_keys.add(capture.key)
+                self.candidate_scores[capture.key] = candidate_paths[rgb.resolve()]
+        self.image_filter.blockSignals(True)
+        self.image_filter.setCurrentIndex(self.image_filter.findData("candidates"))
+        self.image_filter.blockSignals(False)
+        self._populate_catalog()
+        QMessageBox.information(
+            self, "候选筛选完成",
+            f"左侧已切换为 {len(self.candidate_keys)} 张定标布候选。自动结果需要人工确认；可用“影像显示”切回全部图片。",
+        )
 
     def add_roi(self, polygon: list[list[float]]) -> None:
         if not self.current_capture or "RGB" not in self.current_capture.files or not self.catalog:
@@ -1099,7 +1134,7 @@ class MainWindow(QMainWindow):
         output, _ = QFileDialog.getSaveFileName(
             self,
             "保存 Float32 反射率正射影像",
-            str((self.project_dir or Path(source).parent) / "reflectance_orthophoto.tif"),
+            str(Path(source).with_name(f"{Path(source).stem}_ref{Path(source).suffix}")),
             "GeoTIFF (*.tif)",
         )
         if not output:
