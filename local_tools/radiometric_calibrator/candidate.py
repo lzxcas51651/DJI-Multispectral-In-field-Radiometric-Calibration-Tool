@@ -120,20 +120,21 @@ def _score(path: Path) -> Candidate:
         return Candidate(path, 0.0, None)
 
 
-def find_candidates(paths: list[Path], result_limit: int = 16, scan_limit: int = 160) -> list[Candidate]:
+def find_candidates(paths: list[Path], result_limit: int = 16, progress=None) -> list[Candidate]:
     """Fast, opt-in panel candidate ranking.
 
-    Only first/last captures are scanned because field panels are normally photographed
-    immediately before or after a mission. Images are decoded at reduced resolution and
-    processed in parallel. This function is never called during folder opening.
+    Every RGB capture is scanned. Images are decoded at reduced resolution and processed
+    in parallel. This function is never called during folder opening.
     """
-    if len(paths) > scan_limit:
-        half = scan_limit // 2
-        selected = paths[:half] + paths[-half:]
-    else:
-        selected = paths
-    workers = min(8, max(1, len(selected)))
+    selected = list(paths)
+    if not selected:
+        return []
+    report = progress or (lambda done, total: None)
+    workers = min(8, len(selected))
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        candidates = list(executor.map(_score, selected))
+        candidates = []
+        for done, candidate in enumerate(executor.map(_score, selected), 1):
+            candidates.append(candidate)
+            report(done, len(selected))
     candidates.sort(key=lambda item: item.score, reverse=True)
     return [candidate for candidate in candidates[:result_limit] if candidate.score >= 0.55]

@@ -2,11 +2,12 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
 from radiometric_calibrator.calibration import fit_models
-from radiometric_calibrator.candidate import find_candidates
+from radiometric_calibrator.candidate import Candidate, find_candidates
 from radiometric_calibrator.catalog import scan_folder
 from radiometric_calibrator.geotiff import apply_models, describe_bands
 from radiometric_calibrator.metadata import read_image_metadata
@@ -72,6 +73,20 @@ class CatalogTests(unittest.TestCase):
 
 
 class CalibrationTests(unittest.TestCase):
+    def test_candidate_scan_includes_middle_of_large_batch(self):
+        paths = [Path(f'image-{index:04d}.jpg') for index in range(401)]
+        middle = paths[200]
+        visited, progress = [], []
+        def fake_score(path):
+            visited.append(path)
+            score = 0.9 if path == middle else 0.0
+            return Candidate(path, score, (1, 1, 2, 2) if score else None)
+        with patch('radiometric_calibrator.candidate._score', side_effect=fake_score):
+            result = find_candidates(paths, progress=lambda done, total: progress.append((done, total)))
+        self.assertEqual(set(visited), set(paths))
+        self.assertEqual(result[0].path, middle)
+        self.assertEqual(progress[-1], (401, 401))
+
     def test_alpha_recognized_from_color_interpretation(self):
         import rasterio
         from rasterio.enums import ColorInterp

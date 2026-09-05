@@ -1,6 +1,6 @@
 # DJI Multispectral In-field Radiometric Calibration Tool
 
-DJI P4M / M3M 多光谱现场辐射定标工具，独立 Windows 桌面程序。当前版本 **2.2.1**。
+DJI P4M / M3M 多光谱现场辐射定标工具，独立 Windows 桌面程序。当前版本 **2.3.0**。
 
 ### 功能与版本说明
 
@@ -26,18 +26,18 @@ DN 正射波段映射改为同一个窗口：每个定标波段选择对应输�
 
 自动查找完成且存在结果时，左侧自动切换为“自动查找的定标布候选”，显示全部候选 RGB 图片；“影像显示”可随时切换回全部 RGB 影像。应用到 DN 正射影像时，默认输出在输入文件同目录，名称为 `<输入文件名>_ref.tif`，保存前仍可修改。
 
-候选算法要求区域整体呈黑/灰/白低饱和度色调，并具有直线边缘的凸四边形特征。算法使用区域平均饱和度判断和评分，不要求固定比例的单个像素通过阈值，因此允许少量文字、污渍、反光和边缘背景。一张 RGB 图可识别多块互不重叠的疑似定标布，图片评分综合最多前四块结果，工具提示显示疑似块数。算法仍是缩略图启发式检索：只检查不超过 160 张（数量更多时为前后各 80 张），最多显示 16 张、最低分 0.55，结果必须人工确认。
+候选算法要求区域整体呈黑/灰/白低饱和度色调，并具有直线边缘的凸四边形特征。算法使用区域平均饱和度判断和评分，不要求固定比例的单个像素通过阈值，因此允许少量文字、污渍、反光和边缘背景。一张 RGB 图可识别多块互不重叠的疑似定标布，图片评分综合最多前四块结果，工具提示显示疑似块数。算法扫描批次内全部 RGB 影像，并在状态栏显示进度；使用缩略图和最多 8 个线程，最多显示 16 张、最低分 0.55，结果必须人工确认。
 
 本工具是独立项目，非 DJI 官方软件；不内置 WebODM，不负责影像拼接，不是热红外温度转换工具。
 
 ## 下载安装
 
-进入 [Releases](https://github.com/lzxcas51651/DJI-Multispectral-In-field-Radiometric-Calibration-Tool/releases)，下载 `DJI_Radiometric_Calibrator_2.2.1_x64.msi`。只需传输这个安装文件，不需要另复制运行库。若仓库为私有，需使用有权限的 GitHub 账号登录。
+进入 [Releases](https://github.com/lzxcas51651/DJI-Multispectral-In-field-Radiometric-Calibration-Tool/releases)，下载 `DJI_Radiometric_Calibrator_2.3.0_x64.msi`。只需传输这个安装文件，不需要另复制运行库。若仓库为私有，需使用有权限的 GitHub 账号登录。
 
 - 目标环境：Windows 10 1809+ / Windows 11，x64；其他系统未验证。
 - 运行软件无需安装 Python、.NET SDK、WSL、Docker 或 DJI Thermal SDK。
 - 安装需要管理员权限，支持选择目录、桌面/开始菜单快捷方式。
-- 已安装旧版本的用户：关闭旧程序，运行 2.2.1 安装包升级。
+- 已安装旧版本的用户：关闭旧程序，运行 2.3.0 安装包升级。
 - 修复：重新运行同版本 MSI，选择修复；卸载：Windows“已安装的应用”，或 MSI 维护界面。
 - 卸载不删除原始影像、定标项目或用户偏好设置。
 - 安装包暂未数字签名，可能显示未知发布者。核对来源和 Release 的 SHA256，不要关闭系统安全保护。
@@ -50,7 +50,7 @@ DN 正射波段映射改为同一个窗口：每个定标波段选择对应输�
 | --- | --- |
 | 传感器识别 | 读取影像 EXIF/XMP 和标准文件名，支持 P4M、M3M；无需航线文件 |
 | 照片浏览 | 左侧只显示 RGB；文件名位于缩略图下方，原始窄波段仍保留参与计算 |
-| 自动查找 | 默认关闭，点击后才快速扫描最多 160 张 RGB，返回候选供人工确认 |
+| 自动查找 | 默认关闭，点击后扫描批次内全部 RGB，返回候选供人工确认 |
 | 手动导入 | 可导入 RGB 定标布照片；计算前需关联齐全的同次拍摄多光谱波段 |
 | ROI 标注 | RGB 矩形/多边形 ROI，多图多区域，编号与列表联动，可禁用或删除 |
 | 画布交互 | 中键拖动、以鼠标为中心滚轮缩放；无独立平移按钮 |
@@ -120,7 +120,7 @@ cd D:\Code\DJI-Radiometric\local_tools
 ```powershell
 powershell -ExecutionPolicy Bypass -File `
   local_tools\radiometric_calibrator\build_windows_installer.ps1 `
-  -Version 2.2.1 -UseStandaloneWix
+  -Version 2.3.0 -UseStandaloneWix
 ```
 
 该命令构建隔离 EXE、下载固定 WiX 工具、生成文件清单、做启动自检并编译/检查 MSI；不会自动安装软件。输出位于 `local_tools/radiometric_calibrator/installer/release/`。已有最新 EXE 时可加 `-SkipExeBuild`。发布新版本需递增三段版本号，保留稳定的 UpgradeCode。工具、依赖、生成目录与安装包不进入 Git；安装包上传 Release。

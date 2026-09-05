@@ -134,6 +134,7 @@ class ThumbnailThread(QThread):
 class CandidateThread(QThread):
     completed = Signal(object)
     failed = Signal(str)
+    progress = Signal(int, int)
 
     def __init__(self, paths: list[Path]):
         super().__init__()
@@ -141,7 +142,7 @@ class CandidateThread(QThread):
 
     def run(self) -> None:
         try:
-            result = find_candidates(self.paths)
+            result = find_candidates(self.paths, progress=self.progress.emit)
             if not self.isInterruptionRequested():
                 self.completed.emit(result)
         except Exception as exc:
@@ -909,11 +910,16 @@ class MainWindow(QMainWindow):
         if self.candidate_thread and self.candidate_thread.isRunning():
             return
         paths = self.catalog.preview_images
-        self.statusBar().showMessage(f"正在快速检查飞行开头和结尾的最多 160 张预览图……")
+        self.statusBar().showMessage(f"正在检查全部 {len(paths)} 张 RGB 预览图……")
         self.candidate_thread = CandidateThread(paths)
         generation = self._generation
         self.candidate_thread.completed.connect(
             lambda result, gen=generation: self.show_candidates(result) if gen == self._generation else None
+        )
+        self.candidate_thread.progress.connect(
+            lambda done, total, gen=generation: self.statusBar().showMessage(
+                f"正在检查全部 RGB 影像：{done}/{total}（{done * 100 // max(total, 1)}%）"
+            ) if gen == self._generation else None
         )
         self.candidate_thread.failed.connect(
             lambda message, gen=generation: QMessageBox.warning(self, "自动查找失败", message) if gen == self._generation else None
