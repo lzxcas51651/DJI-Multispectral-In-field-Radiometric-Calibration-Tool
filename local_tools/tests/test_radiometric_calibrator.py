@@ -219,12 +219,23 @@ class CalibrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "panel.jpg"
             image = np.full((500, 700, 3), 35, dtype=np.uint8)
-            cv2.rectangle(image, (180, 140), (520, 370), (210, 210, 210), -1)
+            cv2.rectangle(image, (100, 120), (290, 300), (210, 210, 210), -1)
+            cv2.rectangle(image, (390, 160), (590, 350), (90, 90, 90), -1)
             ok, encoded = cv2.imencode(".jpg", image)
             self.assertTrue(ok)
             encoded.tofile(str(path))
             candidates = find_candidates([path])
             self.assertEqual(candidates[0].path, path)
+            self.assertGreaterEqual(candidates[0].panel_count, 2)
+            self.assertGreaterEqual(len(candidates[0].rectangles), 2)
+
+            colored_path = Path(directory) / "colored.jpg"
+            colored = np.full((500, 700, 3), 35, dtype=np.uint8)
+            cv2.rectangle(colored, (180, 140), (520, 370), (0, 0, 230), -1)
+            ok, encoded = cv2.imencode('.jpg', colored)
+            self.assertTrue(ok)
+            encoded.tofile(str(colored_path))
+            self.assertEqual(find_candidates([colored_path]), [])
 
             gray_path = Path(directory) / "panel.tif"
             gray = np.full((100, 100), 1000, dtype=np.uint16)

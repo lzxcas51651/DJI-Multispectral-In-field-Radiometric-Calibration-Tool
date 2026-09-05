@@ -1,8 +1,8 @@
 # DJI Multispectral In-field Radiometric Calibration Tool
 
-DJI P4M / M3M 多光谱现场辐射定标工具，独立 Windows 桌面程序。当前版本 **2.2.0**。
+DJI P4M / M3M 多光谱现场辐射定标工具，独立 Windows 桌面程序。当前版本 **2.2.1**。
 
-### v2.2.0 后台处理与进度
+### 功能与版本说明
 
 v2.2.0 更新：P4M 可输入 5 个光谱波段加末尾 Alpha，M3M 可输入 4 个光谱波段加末尾 Alpha。Alpha 通过 TIFF 颜色解释或包含 Alpha 的波段描述识别，不需要系数，也不作为输出光谱波段。未识别的额外波段仍禁止继续。右侧系数列表（计算后及载入后）均按 Blue、Green、Red、RedEdge、NIR 显示，M3M 不含 Blue；这仅改变显示顺序，不改变系数值。
 
@@ -26,16 +26,18 @@ DN 正射波段映射改为同一个窗口：每个定标波段选择对应输�
 
 自动查找完成且存在结果时，左侧自动切换为“自动查找的定标布候选”，显示全部候选 RGB 图片；“影像显示”可随时切换回全部 RGB 影像。应用到 DN 正射影像时，默认输出在输入文件同目录，名称为 `<输入文件名>_ref.tif`，保存前仍可修改。
 
+候选算法要求区域整体呈黑/灰/白低饱和度色调，并具有直线边缘的凸四边形特征。算法使用区域平均饱和度判断和评分，不要求固定比例的单个像素通过阈值，因此允许少量文字、污渍、反光和边缘背景。一张 RGB 图可识别多块互不重叠的疑似定标布，图片评分综合最多前四块结果，工具提示显示疑似块数。算法仍是缩略图启发式检索：只检查不超过 160 张（数量更多时为前后各 80 张），最多显示 16 张、最低分 0.55，结果必须人工确认。
+
 本工具是独立项目，非 DJI 官方软件；不内置 WebODM，不负责影像拼接，不是热红外温度转换工具。
 
 ## 下载安装
 
-进入 [Releases](https://github.com/lzxcas51651/DJI-Multispectral-In-field-Radiometric-Calibration-Tool/releases)，下载 `DJI_Radiometric_Calibrator_2.2.0_x64.msi`。只需传输这个安装文件，不需要另复制运行库。若仓库为私有，需使用有权限的 GitHub 账号登录。
+进入 [Releases](https://github.com/lzxcas51651/DJI-Multispectral-In-field-Radiometric-Calibration-Tool/releases)，下载 `DJI_Radiometric_Calibrator_2.2.1_x64.msi`。只需传输这个安装文件，不需要另复制运行库。若仓库为私有，需使用有权限的 GitHub 账号登录。
 
 - 目标环境：Windows 10 1809+ / Windows 11，x64；其他系统未验证。
 - 运行软件无需安装 Python、.NET SDK、WSL、Docker 或 DJI Thermal SDK。
 - 安装需要管理员权限，支持选择目录、桌面/开始菜单快捷方式。
-- 已安装 1.0.0 的用户：关闭旧程序，运行 2.2.0 安装包升级。
+- 已安装旧版本的用户：关闭旧程序，运行 2.2.1 安装包升级。
 - 修复：重新运行同版本 MSI，选择修复；卸载：Windows“已安装的应用”，或 MSI 维护界面。
 - 卸载不删除原始影像、定标项目或用户偏好设置。
 - 安装包暂未数字签名，可能显示未知发布者。核对来源和 Release 的 SHA256，不要关闭系统安全保护。
@@ -118,7 +120,7 @@ cd D:\Code\DJI-Radiometric\local_tools
 ```powershell
 powershell -ExecutionPolicy Bypass -File `
   local_tools\radiometric_calibrator\build_windows_installer.ps1 `
-  -Version 2.2.0 -UseStandaloneWix
+  -Version 2.2.1 -UseStandaloneWix
 ```
 
 该命令构建隔离 EXE、下载固定 WiX 工具、生成文件清单、做启动自检并编译/检查 MSI；不会自动安装软件。输出位于 `local_tools/radiometric_calibrator/installer/release/`。已有最新 EXE 时可加 `-SkipExeBuild`。发布新版本需递增三段版本号，保留稳定的 UpgradeCode。工具、依赖、生成目录与安装包不进入 Git；安装包上传 Release。

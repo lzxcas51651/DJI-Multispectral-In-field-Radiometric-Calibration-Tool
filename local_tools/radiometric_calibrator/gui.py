@@ -560,6 +560,7 @@ class MainWindow(QMainWindow):
         self.candidate_thread: CandidateThread | None = None
         self.candidate_keys: set[str] = set()
         self.candidate_scores: dict[str, float] = {}
+        self.candidate_panel_counts: dict[str, int] = {}
         self._retired_threads = []
         self._generation = 0
         self._busy = False
@@ -723,6 +724,7 @@ class MainWindow(QMainWindow):
         self.annotations, self.samples, self.models = [], [], {}
         self.candidate_keys.clear()
         self.candidate_scores.clear()
+        self.candidate_panel_counts.clear()
         self.project_dir = None
         self.capture_list.clear()
         self.canvas.clear_photo()
@@ -775,7 +777,9 @@ class MainWindow(QMainWindow):
             item = QListWidgetItem(QIcon(), capture.files["RGB"].name)
             item.setData(Qt.UserRole, capture.key)
             score = self.candidate_scores.get(capture.key)
-            available = ", ".join(capture.files) + (f"\n定标布候选评分：{score:.2f}" if score is not None else "")
+            available = ", ".join(capture.files) + (
+                f"\n疑似定标布：{self.candidate_panel_counts.get(capture.key, 0)} 块；评分：{score:.2f}"
+                if score is not None else "")
             item.setToolTip(available)
             self.capture_list.addItem(item)
         complete = len(self.catalog.complete_captures)
@@ -921,16 +925,19 @@ class MainWindow(QMainWindow):
         if not candidates:
             self.candidate_keys.clear()
             self.candidate_scores.clear()
+            self.candidate_panel_counts.clear()
             QMessageBox.information(self, "没有候选", "没有发现明显的规则定标布，请使用缩略图或手动导入。")
             return
         self.candidate_keys.clear()
         self.candidate_scores.clear()
-        candidate_paths = {item.path.resolve(): item.score for item in candidates}
+        candidate_paths = {item.path.resolve(): item for item in candidates}
         for capture in self.catalog.captures:
             rgb = capture.files.get("RGB")
             if rgb and rgb.resolve() in candidate_paths:
                 self.candidate_keys.add(capture.key)
-                self.candidate_scores[capture.key] = candidate_paths[rgb.resolve()]
+                candidate = candidate_paths[rgb.resolve()]
+                self.candidate_scores[capture.key] = candidate.score
+                self.candidate_panel_counts[capture.key] = candidate.panel_count
         self.image_filter.blockSignals(True)
         self.image_filter.setCurrentIndex(self.image_filter.findData("candidates"))
         self.image_filter.blockSignals(False)

@@ -13,6 +13,8 @@ class Candidate:
     path: Path
     score: float
     rectangle: tuple[int, int, int, int] | None
+    rectangles: tuple[tuple[int, int, int, int], ...] = ()
+    panel_count: int = 0
 
 
 def _decode_small(path: Path, maximum: int = 480) -> tuple[np.ndarray, float]:
@@ -36,9 +38,10 @@ def _score(path: Path) -> Candidate:
         gray = cv2.GaussianBlur(gray, (5, 5), 0)
         edges = cv2.Canny(gray, 45, 130)
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        # Calibration cloth is often gray or white. A low-saturation mask finds
-        # large cloth panels even when their internal grid breaks Canny edges.
-        neutral = cv2.inRange(hsv, np.asarray((0, 0, 80)), np.asarray((179, 75, 255)))
+        # Reflectance panels must be black/gray/white: hue is irrelevant, while
+        # saturation/chroma stays low. Include dark panels (V >= 8), unlike the
+        # former bright-only mask.
+        neutral = cv2.inRange(hsv, np.asarray((0, 0, 8)), np.asarray((179, 65, 255)))
         kernel = np.ones((7, 7), np.uint8)
         neutral = cv2.morphologyEx(neutral, cv2.MORPH_CLOSE, kernel, iterations=2)
         contour_sets = []
@@ -46,7 +49,7 @@ def _score(path: Path) -> Candidate:
             contours, _ = cv2.findContours(mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
             contour_sets.extend(contours)
         area_image = float(gray.shape[0] * gray.shape[1])
-        best_score, best_box = 0.0, None
+        detections = []
         for contour in contour_sets:
             area = cv2.contourArea(contour)
             fraction = area / area_image
@@ -61,7 +64,12 @@ def _score(path: Path) -> Candidate:
             aspect = max(rw, rh) / max(min(rw, rh), 1.0)
             if aspect > 6.0:
                 continue
-            polygon = cv2.boxPoints(rectangle).astype(np.int32)
+            perimeter = cv2.arcLength(contour, True)
+            polygon = cv2.approxPolyDP(contour, 0.035 * perimeter, True)
+            # Straight edges are mandatory: retain convex quadrilaterals only.
+            if len(polygon) != 4 or not cv2.isContourConvex(polygon):
+                continue
+            polygon = polygon.reshape(-1, 2).astype(np.int32)
             x, y, w, h = cv2.boundingRect(polygon)
             rectangularity = area / max(float(rw * rh), 1.0)
             if rectangularity < 0.55:
@@ -69,15 +77,45 @@ def _score(path: Path) -> Candidate:
             mask = np.zeros_like(gray)
             cv2.fillPoly(mask, [polygon], 255)
             values = gray[mask != 0]
+            saturation = hsv[:, :, 1][mask != 0]
+            # Judge the region as a whole. Do not require an arbitrary share of
+            # individual pixels to pass a binary threshold: labels, stains,
+            # specular highlights and a little border background are tolerated.
+            mean_saturation = float(np.mean(saturation))
+            if mean_saturation > 85.0:
+                continue
+            neutrality = max(0.0, 1.0 - mean_saturation / 85.0)
             uniformity = max(0.0, 1.0 - float(values.std()) / 90.0)
-            brightness = min(1.0, float(values.mean()) / 180.0)
             size_score = min(1.0, fraction / 0.02)
-            score = 0.38 * rectangularity + 0.34 * uniformity + 0.18 * size_score + 0.10 * brightness
-            if score > best_score:
-                best_score = score
-                inv = 1.0 / max(scale, 1e-12)
-                best_box = tuple(int(round(v * inv)) for v in (x, y, w, h))
-        return Candidate(path, best_score, best_box)
+            straightness = min(1.0, cv2.arcLength(polygon, True) / max(perimeter, 1.0))
+            score = (0.32 * rectangularity + 0.23 * straightness + 0.20 * uniformity
+                     + 0.15 * neutrality + 0.10 * size_score)
+            detections.append((score, (x, y, w, h)))
+
+        # Edge and neutral masks can find the same panel. Keep non-overlapping
+        # boxes, then combine several panels into one image-level score.
+        kept = []
+        for score, box in sorted(detections, reverse=True):
+            x, y, w, h = box
+            duplicate = False
+            for _, (kx, ky, kw, kh) in kept:
+                intersection = max(0, min(x+w, kx+kw)-max(x, kx)) * max(0, min(y+h, ky+kh)-max(y, ky))
+                union = w*h + kw*kh - intersection
+                if union and intersection / union > 0.45:
+                    duplicate = True
+                    break
+            if not duplicate:
+                kept.append((score, box))
+            if len(kept) == 8:
+                break
+        if not kept:
+            return Candidate(path, 0.0, None)
+        inv = 1.0 / max(scale, 1e-12)
+        boxes = tuple(tuple(int(round(v * inv)) for v in box) for _, box in kept)
+        scores = [value for value, _ in kept[:4]]
+        image_score = min(1.0, 0.75 * scores[0] + 0.25 * sum(scores) / len(scores)
+                          + min(0.08, 0.02 * (len(kept) - 1)))
+        return Candidate(path, image_score, boxes[0], boxes, len(boxes))
     except Exception:
         return Candidate(path, 0.0, None)
 
@@ -98,4 +136,4 @@ def find_candidates(paths: list[Path], result_limit: int = 16, scan_limit: int =
     with ThreadPoolExecutor(max_workers=workers) as executor:
         candidates = list(executor.map(_score, selected))
     candidates.sort(key=lambda item: item.score, reverse=True)
-    return [candidate for candidate in candidates[:result_limit] if candidate.score > 0]
+    return [candidate for candidate in candidates[:result_limit] if candidate.score >= 0.55]
